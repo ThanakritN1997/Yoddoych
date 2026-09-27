@@ -217,16 +217,22 @@ const fx = new CameraFX();
 const layers = []; // ลำดับวาด ล่าง → บน
 let selected = null;
 
-function newLayer(kind) {
-  const video = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
-  return { kind, name: kind === 'screen' ? 'จอ iPhone / หน้าต่าง' : 'กล้อง', video, stream: null, visible: true,
+// ชนิดเลเยอร์: screen = จอ/หน้าต่าง (1 ชิ้น) · cam = กล้อง (1 ชิ้น) · image = รูป (หลายชิ้น) · web = URL/วิดเจ็ตที่จับภาพจากหน้าต่าง (หลายชิ้น)
+const LAYER_NAMES = { screen: 'จอ iPhone / หน้าต่าง', cam: 'กล้อง', image: 'รูป', web: 'URL' };
+function newLayer(kind, name) {
+  const l = { kind, name: name || LAYER_NAMES[kind], stream: null, visible: true, opacity: 1,
     x: 0, y: 0, w: 1, pa: 16 / 9, preset: 'full', crop: { t: 0, b: 0, l: 0, r: 0 }, shape: 'round' };
+  if (kind !== 'image') l.video = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
+  return l;
 }
 const layerH = (l) => (l.w * canvas.width) / l.pa / canvas.height;
 const getLayer = (kind) => layers.find((l) => l.kind === kind);
+const hasContent = (l) => !!(l && (l.stream || l.img));
+const isCapture = (l) => l.kind === 'screen' || l.kind === 'web';
 
 // อัตราส่วนของเนื้อหาจริง (หลังตัดขอบ)
 function contentAspect(l) {
+  if (l.kind === 'image') return l.img.naturalWidth / Math.max(1, l.img.naturalHeight);
   const v = l.video;
   if (!v.videoWidth) return 16 / 9;
   if (l.kind === 'cam') return l.shape === 'circle' ? 1 : v.videoWidth / v.videoHeight;
@@ -279,15 +285,33 @@ function applyPreset(l, pos) {
 }
 
 function drawLayer(l) {
-  const v = l.video;
-  if (!l.visible || !v.videoWidth) return;
+  if (!l.visible || !hasContent(l)) return;
+  ctx2d.save();
+  ctx2d.globalAlpha = l.opacity ?? 1;
+  drawLayerContent(l);
+  ctx2d.restore();
+}
+
+function drawLayerContent(l) {
   const W = canvas.width;
   const H = canvas.height;
   const x = l.x * W;
   const y = l.y * H;
   const w = l.w * W;
   const h = layerH(l) * H;
-  if (l.kind === 'screen') {
+  if (l.kind === 'image') {
+    // กรอบไม่เท่าสัดส่วนรูป → ครอปตรงกลาง ไม่ยืดรูป
+    const iw = l.img.naturalWidth;
+    const ih = l.img.naturalHeight;
+    const s = Math.max(w / iw, h / ih);
+    const cw = w / s;
+    const ch = h / s;
+    ctx2d.drawImage(l.img, (iw - cw) / 2, (ih - ch) / 2, cw, ch, x, y, w, h);
+    return;
+  }
+  const v = l.video;
+  if (!v.videoWidth) return;
+  if (isCapture(l)) {
     const c = l.crop;
     let sx = c.l;
     let sy = c.t;
@@ -304,6 +328,11 @@ function drawLayer(l) {
       const nh = sw / boxA;
       sy += (sh - nh) / 2;
       sh = nh;
+    }
+    // วิดเจ็ต URL: ลบพื้นหลังสีที่เลือก
+    if (l.kind === 'web' && l.key && l.key.color && l.chroma) {
+      const keyed = l.chroma.process(v, sx, sy, sw, sh, l.key.color, l.key.sim);
+      if (keyed) return ctx2d.drawImage(keyed, x, y, w, h);
     }
     ctx2d.drawImage(v, sx, sy, sw, sh, x, y, w, h);
     return;
@@ -345,7 +374,7 @@ function draw() {
     ctx2d.textBaseline = 'middle';
     ctx2d.fillText(text, Math.round(W * 0.03), H - bh / 2, W * 0.94);
   }
-  $('stageHint').hidden = layers.some((l) => l.stream);
+  $('stageHint').hidden = layers.some(hasContent);
   drawOverlay();
 }
 const bannerText = () => $('banner').value.trim();
@@ -373,7 +402,7 @@ function drawOverlay() {
   }
   octx.setTransform(dpr, 0, 0, dpr, 0, 0);
   octx.clearRect(0, 0, r.width, r.height);
-  if (!selected || !selected.stream || !selected.visible) return; // กรอบอยู่บน overlay เท่านั้น ไม่ติดไปในไลฟ์
+  if (!hasContent(selected) || !selected.visible) return; // กรอบอยู่บน overlay เท่านั้น ไม่ติดไปในไลฟ์
   const x = selected.x * r.width;
   const y = selected.y * r.height;
   const w = selected.w * r.width;
@@ -427,7 +456,7 @@ function pointerPos(e) {
 function hitTest(fx, fy) {
   for (let i = layers.length - 1; i >= 0; i--) {
     const l = layers[i];
-    if (l.stream && l.visible && fx >= l.x && fx <= l.x + l.w && fy >= l.y && fy <= l.y + layerH(l)) return l;
+    if (hasContent(l) && l.visible && fx >= l.x && fx <= l.x + l.w && fy >= l.y && fy <= l.y + layerH(l)) return l;
   }
   return null;
 }
@@ -494,7 +523,7 @@ function select(l) {
 }
 
 function renderLayerPanel() {
-  const active = layers.filter((l) => l.stream);
+  const active = layers.filter(hasContent);
   $('layerPanel').hidden = !active.length;
   if (!active.includes(selected)) selected = active[active.length - 1] || null;
   $('layerTabs').innerHTML = '';
@@ -506,13 +535,67 @@ function renderLayerPanel() {
     $('layerTabs').append(b);
   }
   if (!selected) return;
-  $('cropBox').hidden = selected.kind !== 'screen';
+  $('cropBox').hidden = !isCapture(selected);
+  $('cropAuto').hidden = selected.kind !== 'screen'; // ตัดขอบดำอัตโนมัติเฉพาะจอ (วิดเจ็ตมักมีพื้นทึบ)
   $('shapeBox').hidden = selected.kind !== 'cam';
+  $('keyBox').hidden = selected.kind !== 'web';
   $('lyHide').textContent = selected.visible ? 'ซ่อน' : 'แสดง';
   $('cropTop').value = selected.crop.t;
   $('cropTopLabel').textContent = selected.crop.t + ' px';
+  $('lyOpacity').value = Math.round((selected.opacity ?? 1) * 100);
+  $('lyOpacityLabel').textContent = $('lyOpacity').value + '%';
   document.querySelectorAll('[data-shape]').forEach((b) => b.classList.toggle('primary', b.dataset.shape === selected.shape));
+  if (selected.kind === 'web') {
+    const k = selected.key || {};
+    document.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('primary', (b.dataset.key === 'off' && !k.color) || b.dataset.key === k.mode));
+    $('keySim').value = Math.round((k.sim ?? 0.3) * 100);
+    if (k.color) $('keyColor').value = rgbToHex(k.color);
+  }
 }
+
+const rgbToHex = (c) => '#' + c.map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+
+$('lyOpacity').oninput = () => {
+  if (!selected) return;
+  selected.opacity = $('lyOpacity').value / 100;
+  $('lyOpacityLabel').textContent = $('lyOpacity').value + '%';
+  saveLayout();
+};
+
+// ลบพื้นหลังสีของวิดเจ็ต URL
+const KEY_PRESETS = { green: [0, 1, 0], black: [0, 0, 0], white: [1, 1, 1] };
+function sampleCornerColor(l) {
+  const v = l.video;
+  const c = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(v, l.crop.l + 4, l.crop.t + 4, 1, 1, 0, 0, 1, 1); // มุมซ้ายบนของเนื้อหา มักเป็นพื้นหลัง
+  const d = g.getImageData(0, 0, 1, 1).data;
+  return [d[0] / 255, d[1] / 255, d[2] / 255];
+}
+document.querySelectorAll('[data-key]').forEach((b) => (b.onclick = () => {
+  const l = selected;
+  if (!l || l.kind !== 'web') return;
+  const mode = b.dataset.key;
+  l.key = l.key || { sim: 0.3 };
+  l.key.mode = mode;
+  if (mode === 'off') l.key.color = null;
+  else if (mode === 'auto') l.key.color = sampleCornerColor(l);
+  else l.key.color = KEY_PRESETS[mode];
+  if (l.key.color && !l.chroma) l.chroma = new ChromaKey();
+  renderLayerPanel();
+}));
+$('keyColor').oninput = () => {
+  const l = selected;
+  if (!l || l.kind !== 'web') return;
+  l.key = { ...(l.key || { sim: 0.3 }), mode: 'custom', color: hexToRgb($('keyColor').value) };
+  if (!l.chroma) l.chroma = new ChromaKey();
+  renderLayerPanel();
+};
+$('keySim').oninput = () => {
+  if (!selected || !selected.key) return;
+  selected.key.sim = $('keySim').value / 100;
+};
 
 document.querySelectorAll('[data-pos]').forEach((b) => (b.onclick = () => {
   if (!selected) return;
@@ -533,7 +616,7 @@ document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => {
 $('lyFront').onclick = () => { if (!selected) return; layers.splice(layers.indexOf(selected), 1); layers.push(selected); renderLayerPanel(); saveLayout(); };
 $('lyBack').onclick = () => { if (!selected) return; layers.splice(layers.indexOf(selected), 1); layers.unshift(selected); renderLayerPanel(); saveLayout(); };
 $('lyHide').onclick = () => { if (!selected) return; selected.visible = !selected.visible; renderLayerPanel(); };
-$('lyRemove').onclick = () => selected && removeSource(selected.kind);
+$('lyRemove').onclick = () => selected && removeLayer(selected);
 
 // ---------- ตัดหัวหน้าต่าง / ขอบดำ ----------
 function setCrop(l, crop) {
@@ -559,7 +642,7 @@ const titleBarPx = () => Math.round(31 * (window.devicePixelRatio || 1));
 function autoCrop(l) {
   const v = l.video;
   if (!v.videoWidth) return;
-  const top = l.kind === 'screen' && l.surface === 'window' ? titleBarPx() : 0;
+  const top = isCapture(l) && l.surface === 'window' ? titleBarPx() : 0;
   // เริ่มสแกนใต้แถบชื่อลงมาอีก 3px และปิดการเกลี่ยพิกเซล ไม่ให้สีแถบชื่อซึมมาถูกนับเป็นเนื้อหา
   const scanTop = top ? top + 3 : 0;
   const sw = 320;
@@ -611,13 +694,14 @@ $('cropReset').onclick = () => { if (selected) { setCrop(selected, { t: 0, b: 0,
 
 // ---------- จำการจัดวาง ----------
 function saveLayout() {
-  store.set('layout', layers.map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape })));
+  store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity })));
+  saveImagesSoon();
 }
 const savedLayout = store.get('layout', []);
 function restoreLayout(l) {
   const s = savedLayout.find((x) => x.kind === l.kind);
   if (!s) return false;
-  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape });
+  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape, opacity: s.opacity ?? 1 });
   if (l.preset) applyPreset(l, l.preset);
   return true;
 }
@@ -717,6 +801,223 @@ async function startCam() {
   }
 }
 $('camSelect').onchange = () => { if (getLayer('cam')?.stream) startCam(); };
+
+function removeLayer(l) {
+  if (l.kind === 'screen' || l.kind === 'cam') return removeSource(l.kind);
+  if (l.stream) l.stream.getTracks().forEach((t) => t.stop());
+  if (l.win && !l.win.closed) l.win.close();
+  if (l.img) URL.revokeObjectURL(l.img.src);
+  layers.splice(layers.indexOf(l), 1);
+  if (l.kind === 'image') idb('delete', l.uid);
+  if (selected === l) selected = null;
+  renderLayerPanel();
+  saveLayout();
+}
+
+// ---------- ที่เก็บรูปในเครื่อง (IndexedDB — รูปใหญ่เกิน localStorage) ----------
+let dbp = null;
+function idb(op, key, value) {
+  try {
+    dbp = dbp || new Promise((res, rej) => {
+      const r = indexedDB.open('yoddoy-studio', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('images');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return dbp.then((db) => new Promise((res, rej) => {
+      const st = db.transaction('images', op === 'get' || op === 'all' ? 'readonly' : 'readwrite').objectStore('images');
+      const r = op === 'put' ? st.put(value, key) : op === 'delete' ? st.delete(key) : op === 'all' ? st.getAll() : st.get(key);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    })).catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+}
+
+let saveImagesTimer;
+function saveImagesSoon() {
+  clearTimeout(saveImagesTimer);
+  saveImagesTimer = setTimeout(() => {
+    layers.forEach((l, order) => {
+      if (l.kind !== 'image') return;
+      idb('put', l.uid, { uid: l.uid, name: l.name, blob: l.blob, order, visible: l.visible, opacity: l.opacity, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset });
+    });
+  }, 400);
+}
+
+// ย่อรูปใหญ่ให้ไม่เกิน 1920px (คงความโปร่งใสด้วย WebP)
+async function normalizeImage(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+  if (s === 1 && blob.size < 3e6) return blob;
+  const c = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * s), height: Math.round(bmp.height * s) });
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res) => c.toBlob(res, 'image/webp', 0.92));
+}
+
+async function addImageLayer(blob, name, saved) {
+  const img = new Image();
+  img.src = URL.createObjectURL(blob);
+  try {
+    await img.decode();
+  } catch {
+    return toast('เปิดไฟล์รูปนี้ไม่ได้');
+  }
+  const l = newLayer('image', name || 'รูป');
+  Object.assign(l, { img, blob, uid: saved?.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())) });
+  layers.push(l);
+  if (saved) {
+    Object.assign(l, { x: saved.x, y: saved.y, w: saved.w, pa: saved.pa, preset: saved.preset, opacity: saved.opacity ?? 1, visible: saved.visible !== false });
+    if (l.preset) applyPreset(l, l.preset);
+  } else {
+    applyPreset(l, 'center');
+    select(l);
+  }
+  renderLayerPanel();
+  saveLayout();
+  return l;
+}
+
+$('imgFile').onchange = async (e) => {
+  for (const f of [...e.target.files]) await addImageLayer(await normalizeImage(f), f.name.replace(/\.[^.]+$/, ''));
+  e.target.value = '';
+};
+
+// รูปจากลิงก์: ลองโหลดตรงก่อน ถ้าเว็บนั้นไม่อนุญาต (CORS) ให้ Helper ช่วยโหลด
+$('imgUrlAdd').onclick = async () => {
+  const url = $('imgUrl').value.trim();
+  if (!/^https?:\/\//i.test(url)) return toast('ใส่ลิงก์รูปที่ขึ้นต้นด้วย https://');
+  let blob = null;
+  try {
+    const r = await fetch(url, { mode: 'cors' });
+    if (r.ok) blob = await r.blob();
+  } catch {}
+  if ((!blob || !blob.type.startsWith('image/')) && H) {
+    try {
+      const r = await fetch(H.base + '/api/image?url=' + encodeURIComponent(url));
+      if (r.ok) blob = await r.blob();
+    } catch {}
+  }
+  if (!blob || !blob.type.startsWith('image/')) return toast('โหลดรูปจากลิงก์นี้ไม่ได้ — ดาวน์โหลดรูปแล้วเลือกจากไฟล์แทน');
+  await addImageLayer(await normalizeImage(blob), new URL(url).pathname.split('/').pop() || 'รูป');
+  $('imgUrl').value = '';
+};
+
+// โหลดรูปที่เคยใส่ไว้กลับมา
+idb('all').then(async (items) => {
+  for (const it of (items || []).sort((a, b) => a.order - b.order)) if (it.blob) await addImageLayer(it.blob, it.name, it);
+});
+
+// ---------- แปะ URL (เหมือน Browser Source ของ OBS) ----------
+// เบราว์เซอร์วาดหน้าเว็บคนอื่นลงภาพไลฟ์ตรง ๆ ไม่ได้ → เปิดลิงก์ในหน้าต่างเล็ก แล้วจับภาพหน้าต่างนั้นมาเป็นเลเยอร์
+// (ต้องกด 2 ครั้ง เพราะเบราว์เซอร์ให้เปิดป๊อปอัปและขอจับภาพจอได้ทีละอย่างต่อการคลิก 1 ครั้ง)
+let pendingWeb = null;
+$('webOpen').onclick = () => {
+  const url = $('webUrl').value.trim();
+  if (!/^https?:\/\//i.test(url)) return toast('ใส่ลิงก์ที่ขึ้นต้นด้วย https://');
+  const w = Math.min(3840, Math.max(200, +$('webW').value || 800));
+  const h = Math.min(2160, Math.max(150, +$('webH').value || 600));
+  const name = 'yoddoy-web-' + Date.now();
+  const win = window.open(url, name, `popup=yes,width=${w},height=${h}`);
+  if (!win) return toast('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วกดอีกครั้ง');
+  pendingWeb = { url, win };
+  $('webCapture').hidden = false;
+  $('webStep').textContent = 'ขั้นที่ 2: กด “จับภาพหน้าต่างนี้” → เลือกแท็บ/หน้าต่างของลิงก์ที่เพิ่งเปิด';
+};
+$('webCapture').onclick = async () => {
+  if (!pendingWeb) return;
+  try {
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const { url, win } = pendingWeb;
+    pendingWeb = null;
+    $('webCapture').hidden = true;
+    $('webStep').textContent = '';
+    const l = newLayer('web', 'URL: ' + new URL(url).hostname.replace(/^www\./, ''));
+    Object.assign(l, { stream: s, url, win, key: { sim: 0.3, color: null, mode: 'off' } });
+    l.video.srcObject = s;
+    l.video.play().catch(() => {});
+    const track = s.getVideoTracks()[0];
+    l.surface = (track.getSettings && track.getSettings().displaySurface) || '';
+    track.onended = () => layers.includes(l) && removeLayer(l);
+    layers.push(l);
+    l.video.onloadedmetadata = () => {
+      if (l.surface === 'window') setCrop(l, { t: titleBarPx(), b: 0, l: 0, r: 0 }); // จับทั้งหน้าต่าง → ตัดแถบชื่อ
+      const a = contentAspect(l);
+      applyPreset(l, Math.abs(a - canvas.width / canvas.height) < 0.05 ? 'fill' : 'center');
+      renderLayerPanel();
+    };
+    select(l);
+    toast('แปะแล้ว — ถ้ามีพื้นหลังทึบ ให้กด “ลบพื้นหลังสี” ในแผงเลเยอร์');
+  } catch {
+    toast('ยกเลิกการจับภาพ');
+  }
+};
+document.querySelectorAll('[data-websize]').forEach((b) => (b.onclick = () => {
+  const [w, h] = b.dataset.websize === 'canvas' ? [canvas.width, canvas.height] : b.dataset.websize.split('x');
+  $('webW').value = w;
+  $('webH').value = h;
+}));
+
+// ---------- แชทสด ----------
+const host = location.hostname;
+function youtubeId(s) {
+  s = String(s || '').trim();
+  const m = s.match(/(?:v=|youtu\.be\/|\/live\/|\/video\/|\/shorts\/)([\w-]{11})/) || s.match(/^([\w-]{11})$/);
+  return m ? m[1] : '';
+}
+const CHAT_SOURCES = {
+  youtube: {
+    embed: (v) => { const id = youtubeId(v); return id && `https://www.youtube.com/live_chat?v=${id}&embed_domain=${host}&dark_theme=1`; },
+    popout: (v) => { const id = youtubeId(v); return id && `https://www.youtube.com/live_chat?is_popout=1&v=${id}`; },
+  },
+  twitch: {
+    embed: (v) => v && `https://www.twitch.tv/embed/${encodeURIComponent(v.trim())}/chat?parent=${host}&darkpopout`,
+    popout: (v) => v && `https://www.twitch.tv/popout/${encodeURIComponent(v.trim())}/chat?popout=`,
+  },
+};
+const chatCfg = store.get('chat', { youtube: '', twitch: '', tab: 'youtube' });
+$('chatYoutube').value = chatCfg.youtube || '';
+$('chatTwitch').value = chatCfg.twitch || '';
+
+function showChat(tab) {
+  chatCfg.tab = tab;
+  chatCfg.youtube = $('chatYoutube').value.trim();
+  chatCfg.twitch = $('chatTwitch').value.trim();
+  store.set('chat', chatCfg);
+  document.querySelectorAll('[data-chat]').forEach((b) => b.classList.toggle('active', b.dataset.chat === tab));
+  const frame = $('chatFrame');
+  const note = $('chatNote');
+  const src = CHAT_SOURCES[tab] && CHAT_SOURCES[tab].embed(chatCfg[tab]);
+  frame.hidden = !src;
+  note.hidden = !!src;
+  if (src && frame.src !== src) frame.src = src;
+  if (!src) {
+    note.innerHTML = {
+      youtube: 'ใส่ลิงก์ไลฟ์หรือ Video ID ของ YouTube ด้านบน (เช่น https://youtube.com/live/xxxxxxxxxxx)',
+      twitch: 'ใส่ชื่อช่อง Twitch ด้านบน',
+      facebook: 'Facebook ไม่อนุญาตให้ฝังแชทไลฟ์ — กดปุ่มด้านล่างเพื่อเปิดหน้าคอมเมนต์ใน Live Producer',
+      tiktok: 'TikTok ไม่มีช่องทางดึงแชททางการ — ดูแชทใน TikTok LIVE Studio หรือแอป TikTok',
+    }[tab];
+  }
+  $('chatPin').hidden = !(CHAT_SOURCES[tab] && CHAT_SOURCES[tab].popout(chatCfg[tab]));
+  $('chatFbOpen').hidden = tab !== 'facebook';
+}
+document.querySelectorAll('[data-chat]').forEach((b) => (b.onclick = () => showChat(b.dataset.chat)));
+$('chatYoutube').onchange = () => showChat('youtube');
+$('chatTwitch').onchange = () => showChat('twitch');
+$('chatFbOpen').onclick = () => window.open('https://www.facebook.com/live/producer', '_blank');
+// แปะแชทบนจอ = เตรียมลิงก์แชทแบบป๊อปเอาท์ในส่วน "แปะ URL" แล้วเปิดหน้าต่างให้เลย
+$('chatPin').onclick = () => {
+  const src = CHAT_SOURCES[chatCfg.tab].popout(chatCfg[chatCfg.tab]);
+  $('webUrl').value = src;
+  $('webW').value = 400;
+  $('webH').value = 600;
+  $('webDetails').open = true;
+  $('webOpen').click();
+  $('webDetails').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+showChat(chatCfg.tab || 'youtube');
 
 // ---------- ฟิลเตอร์กล้อง ----------
 const FX_KEYS = ['smooth', 'glow', 'bright', 'contrast', 'sat', 'warm'];

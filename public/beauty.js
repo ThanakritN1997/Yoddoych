@@ -10,6 +10,69 @@ const FX_PRESETS = {
   mono: { name: 'ขาวดำ', bright: 0, contrast: 0.18, sat: -1, warm: 0, sepia: 0, vignette: 0.2 },
 };
 
+// ลบพื้นหลังสี (chroma key) สำหรับเลเยอร์ URL/วิดเจ็ต — ตัดเฉพาะส่วนที่สีใกล้สีคีย์ ขอบนุ่ม
+class ChromaKey {
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    const gl = this.canvas.getContext('webgl', { premultipliedAlpha: false, alpha: true });
+    this.gl = gl;
+    if (!gl) return;
+    const vs = `attribute vec2 p; varying vec2 uv; uniform vec4 rect;
+      void main(){ vec2 t = vec2(p.x*0.5+0.5, 0.5 - p.y*0.5); uv = rect.xy + t * rect.zw; gl_Position = vec4(p,0.,1.); }`;
+    const fs = `precision mediump float; varying vec2 uv; uniform sampler2D tex; uniform vec3 key; uniform float sim, soft;
+      vec2 chroma(vec3 c){ return vec2(dot(c, vec3(-.169,-.331,.5)), dot(c, vec3(.5,-.419,-.081))); }
+      void main(){
+        vec3 c = texture2D(tex, uv).rgb;
+        // ระยะห่างสี: ใช้ทั้งสี (chroma) และความสว่าง เพื่อคีย์สีดำ/ขาวได้ด้วย
+        float d = length(chroma(c) - chroma(key)) * 2. + abs(dot(c - key, vec3(.299,.587,.114))) * .8;
+        float a = smoothstep(sim, sim + soft, d);
+        // ลดสีคีย์ที่เลอะขอบ (spill)
+        vec3 outc = mix(c, c - key * (1. - a) * .5, 1. - a);
+        gl_FragColor = vec4(clamp(outc, 0., 1.), a);
+      }`;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    this.u = {};
+    for (const n of ['rect', 'key', 'sim', 'soft']) this.u[n] = gl.getUniformLocation(prog, n);
+  }
+
+  // ตัดส่วน (sx,sy,sw,sh) ของวิดีโอ แล้วลบสี key [r,g,b 0–1] · sim = ความกว้างช่วงสีที่ลบ (0–1)
+  process(video, sx, sy, sw, sh, key, sim) {
+    const gl = this.gl;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!gl || !vw) return null;
+    const scale = Math.min(1, 1280 / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * scale));
+    const h = Math.max(1, Math.round(sh * scale));
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+      gl.viewport(0, 0, w, h);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    gl.uniform4f(this.u.rect, sx / vw, sy / vh, sw / vw, sh / vh);
+    gl.uniform3f(this.u.key, key[0], key[1], key[2]);
+    gl.uniform1f(this.u.sim, 0.05 + sim * 0.45);
+    gl.uniform1f(this.u.soft, 0.08);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return this.canvas;
+  }
+}
+
 class CameraFX {
   constructor() {
     this.params = { smooth: 0.4, glow: 0.2, mirror: true, ...FX_PRESETS.normal };

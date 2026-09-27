@@ -95,7 +95,33 @@
         <div class="row">
           <button id="srcScreen" class="btn">📱 จอ iPhone / หน้าต่าง / หน้าจอ</button>
           <button id="srcCam" class="btn">🎥 เปิดกล้อง</button>
+          <label class="btn">🖼 เพิ่มรูป<input id="imgFile" type="file" accept="image/*" multiple hidden></label>
         </div>
+        <div class="row nowrap add-row">
+          <input id="imgUrl" type="url" placeholder="หรือวางลิงก์รูป https://…png" autocomplete="off">
+          <button id="imgUrlAdd" class="btn small">+ รูปจากลิงก์</button>
+        </div>
+
+        <details id="webDetails" class="sub-box web-box">
+          <summary>🔗 แปะ URL บนจอ (แจ้งเตือนโดเนท · วิดเจ็ต · แชทรวม)</summary>
+          <p class="muted small">ใช้ลิงก์ Browser Source แบบเดียวกับ OBS เช่น Tipme, EasyDonate, Streamlabs, StreamElements, Restream Chat</p>
+          <input id="webUrl" type="url" placeholder="https://… ลิงก์วิดเจ็ต" autocomplete="off">
+          <div class="row nowrap add-row">
+            <label class="field inline">กว้าง <input id="webW" type="number" min="200" max="3840" value="800"></label>
+            <label class="field inline">สูง <input id="webH" type="number" min="150" max="2160" value="600"></label>
+          </div>
+          <div class="row wrap-tight">
+            <button class="btn small" data-websize="canvas">เท่าจอไลฟ์</button>
+            <button class="btn small" data-websize="800x600">800×600</button>
+            <button class="btn small" data-websize="400x600">แชท 400×600</button>
+          </div>
+          <div class="row">
+            <button id="webOpen" class="btn primary small">1. เปิดลิงก์</button>
+            <button id="webCapture" class="btn primary small" hidden>2. จับภาพหน้าต่างนี้</button>
+          </div>
+          <p id="webStep" class="muted small"></p>
+          <p class="muted small">ในหน้าต่างเลือกจอ ให้เลือกแท็บ <b>แท็บ Chrome</b> (ไม่มีแถบหัวหน้าต่าง) · ถ้าวิดเจ็ตมีพื้นหลังทึบ ตั้งพื้นหลังในวิดเจ็ตเป็น <b>สีเขียว</b> แล้วกด “ลบพื้นหลังสี → เขียว” · อย่าปิด/ย่อหน้าต่างลิงก์ระหว่างไลฟ์</p>
+        </details>
         <p class="muted small hint-line">ลากภาพบนจอพรีวิวเพื่อย้าย · ลากจุดมุมขวาล่างเพื่อย่อ/ขยาย · ดับเบิลคลิกเพื่อเต็มจอ</p>
 
         <div id="layerPanel" class="layer-panel" hidden>
@@ -116,6 +142,24 @@
             <button id="lyBack" class="btn small">⬇ ไว้ล่างสุด</button>
             <button id="lyHide" class="btn small">ซ่อน</button>
             <button id="lyRemove" class="btn small danger-text">ลบ</button>
+          </div>
+          <label class="field">ความทึบ <span id="lyOpacityLabel" class="muted small">100%</span>
+            <input id="lyOpacity" type="range" min="5" max="100" value="100">
+          </label>
+
+          <div id="keyBox" class="sub-box" hidden>
+            <div class="sub-title">ลบพื้นหลังสี (Chroma key)</div>
+            <div class="row wrap-tight">
+              <button class="btn small" data-key="off">ปิด</button>
+              <button class="btn small" data-key="green">เขียว</button>
+              <button class="btn small" data-key="black">ดำ</button>
+              <button class="btn small" data-key="white">ขาว</button>
+              <button class="btn small" data-key="auto">สีจากมุมภาพ</button>
+              <input id="keyColor" type="color" value="#00ff00" title="เลือกสีเอง" class="color-in">
+            </div>
+            <label class="field">ความกว้างช่วงสีที่ลบ
+              <input id="keySim" type="range" min="0" max="100" value="30">
+            </label>
           </div>
 
           <div id="cropBox" class="sub-box">
@@ -195,6 +239,31 @@
 
     <!-- ขวา: ปลายทาง + บิตเรต + สถานะ -->
     <div class="col">
+      <section class="card">
+        <h2>แชทสด</h2>
+        <div class="grid2">
+          <label class="field">YouTube (ลิงก์ไลฟ์ หรือ Video ID)
+            <input id="chatYoutube" type="text" placeholder="https://youtube.com/live/…" autocomplete="off">
+          </label>
+          <label class="field">Twitch (ชื่อช่อง)
+            <input id="chatTwitch" type="text" placeholder="ชื่อช่อง" autocomplete="off">
+          </label>
+        </div>
+        <div class="layer-tabs chat-tabs">
+          <button data-chat="youtube">YouTube</button>
+          <button data-chat="twitch">Twitch</button>
+          <button data-chat="facebook">Facebook</button>
+          <button data-chat="tiktok">TikTok</button>
+        </div>
+        <iframe id="chatFrame" class="chat-frame" title="แชทสด" hidden></iframe>
+        <p id="chatNote" class="muted small chat-note"></p>
+        <div class="row">
+          <button id="chatPin" class="btn small" hidden>📌 แปะแชทนี้บนจอไลฟ์</button>
+          <button id="chatFbOpen" class="btn small" hidden>เปิดคอมเมนต์ Facebook</button>
+        </div>
+        <p class="muted small">อยากรวมแชททุกช่องบนจอ: ใช้ลิงก์ Chat Overlay ของ Restream หรือ Streamlabs ใน “แปะ URL บนจอ”</p>
+      </section>
+
       <section class="card">
         <h2>ปลายทางไลฟ์</h2>
         <div id="destList" class="dest-list"></div>

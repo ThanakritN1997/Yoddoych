@@ -10,6 +10,17 @@
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 15px;
 }
 @media (max-width: 1312px) { .browser-warn { margin: 12px 16px 0; } }
+.add-row { margin-top: 8px; gap: 6px; }
+.add-row input, .web-box > input { font: inherit; font-size: 14px; letter-spacing: normal; text-align: left; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; min-width: 0; }
+.web-box { margin-top: 10px; display: grid; gap: 8px; }
+.web-box summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.web-box p { margin: 0; }
+.field.inline { flex-direction: row; align-items: center; gap: 6px; margin: 0; flex: 1; }
+.field.inline input { width: 100%; }
+.color-in { width: 38px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.chat-tabs { margin: 10px 0 8px; }
+.chat-frame { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 10px; background: #0f0f0f; }
+.chat-note { background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 12px; margin: 0 0 8px; }
 .output-card .mirror-head h2 { margin: 0; }
 .output-card .steps { margin-top: 4px; }
 .helper-card {

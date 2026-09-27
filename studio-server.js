@@ -286,9 +286,51 @@ function attach() {
   return wss;
 }
 
+// ---------- โหลดรูปจากลิงก์แทนเบราว์เซอร์ (เว็บที่ไม่เปิด CORS) ----------
+const IMAGE_MAX = 15 * 1024 * 1024;
+const privateHost = (h) => /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|0\.)/i.test(h);
+function fetchImage(url, redirects = 3) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(url); } catch { return reject(new Error('ลิงก์ไม่ถูกต้อง')); }
+    if (!/^https?:$/.test(u.protocol) || privateHost(u.hostname)) return reject(new Error('ลิงก์ไม่อนุญาต'));
+    const mod = u.protocol === 'https:' ? https : require('http');
+    const req = mod.get(u, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0 YoddoyHelper', Accept: 'image/*' } }, (r) => {
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location && redirects > 0) {
+        r.resume();
+        return fetchImage(new URL(r.headers.location, u).href, redirects - 1).then(resolve, reject);
+      }
+      const type = String(r.headers['content-type'] || '');
+      if (r.statusCode !== 200 || !type.startsWith('image/')) {
+        r.resume();
+        return reject(new Error('ลิงก์นี้ไม่ใช่ไฟล์รูป'));
+      }
+      const parts = [];
+      let size = 0;
+      r.on('data', (c) => {
+        size += c.length;
+        if (size > IMAGE_MAX) req.destroy(new Error('รูปใหญ่เกิน 15MB'));
+        else parts.push(c);
+      });
+      r.on('end', () => resolve({ type, body: Buffer.concat(parts) }));
+      r.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
 // ---------- HTTP API ----------
 async function handleApi(req, res) {
   const json = (code, obj) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(obj));
+  if (req.url.startsWith('/api/image?') && req.method === 'GET') {
+    try {
+      const img = await fetchImage(new URL(req.url, 'http://x').searchParams.get('url'));
+      return res.writeHead(200, { 'Content-Type': img.type, 'Cache-Control': 'no-store' }).end(img.body);
+    } catch (e) {
+      return json(400, { error: e.message });
+    }
+  }
   if (req.url === '/api/encoders') {
     return json(200, { ffmpeg: !!FFMPEG, encoders: detectEncoders() });
   }
