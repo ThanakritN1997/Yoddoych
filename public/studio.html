@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <title>สตูดิโอไลฟ์</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="studio.css">
+</head>
+<body>
+  <header class="top">
+    <a href="./" class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="3.5" fill="currentColor"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      สตูดิโอไลฟ์
+    </a>
+    <nav class="row small">
+      <a href="./" class="navlink">สะท้อนหน้าจอ</a>
+      <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
+    </nav>
+  </header>
+
+  <div id="browserWarn" class="browser-warn" hidden>
+    ⚠️ เบราว์เซอร์นี้จับภาพจอ/กล้อง/ไมค์ไม่ได้ — เปิด <b>http://localhost:3000/studio.html</b> ใน <b>Chrome</b> หรือ <b>Edge</b>
+    <button id="btnCopyUrl" class="btn small">คัดลอกลิงก์</button>
+  </div>
+
+  <main class="studio">
+    <!-- ซ้าย: ภาพ + แหล่งภาพ/เสียง -->
+    <div class="col">
+      <div id="stageWrap" class="stage-wrap">
+        <div class="canvas-box">
+          <canvas id="canvas" width="1280" height="720"></canvas>
+          <canvas id="overlay" class="overlay" aria-label="ลากเพื่อจัดตำแหน่งภาพ"></canvas>
+        </div>
+        <div id="liveBadge" class="live-badge" hidden>● LIVE <span id="liveTime">00:00:00</span></div>
+        <div id="stageHint" class="stage-hint">เลือกแหล่งภาพด้านล่าง<br><span class="muted small">จอ iPhone: สะท้อนหน้าจอไปที่ PC-Mirror ก่อน แล้วเลือกหน้าต่าง UxPlay</span></div>
+      </div>
+
+      <section id="mirrorCard" class="card mirror-card" hidden>
+        <div class="mirror-head">
+          <h2>สะท้อนหน้าจอ iPhone <span class="tag">AirPlay</span></h2>
+          <span id="mirrorState" class="mstate off">ปิดอยู่</span>
+        </div>
+        <div class="row">
+          <button id="btnMirror" class="btn primary">▶ เริ่มสะท้อนหน้าจอ</button>
+          <button id="btnUseMirror" class="btn" data-target="srcScreen" hidden>ใช้จอ iPhone เป็นภาพไลฟ์</button>
+        </div>
+        <ol class="steps small">
+          <li>กด <b>เริ่มสะท้อนหน้าจอ</b></li>
+          <li>iPhone: <b>ศูนย์ควบคุม</b> → <b>การสะท้อนหน้าจอ</b> → <b>PC-Mirror</b></li>
+          <li>กด <b>ใช้จอ iPhone เป็นภาพไลฟ์</b> → แท็บ <b>หน้าต่าง</b> → เลือก <b>UxPlay</b></li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>แหล่งภาพ &amp; จัดวาง</h2>
+        <div class="row">
+          <button id="srcScreen" class="btn">📱 จอ iPhone / หน้าต่าง / หน้าจอ</button>
+          <button id="srcCam" class="btn">🎥 เปิดกล้อง</button>
+        </div>
+        <p class="muted small hint-line">ลากภาพบนจอพรีวิวเพื่อย้าย · ลากจุดมุมขวาล่างเพื่อย่อ/ขยาย · ดับเบิลคลิกเพื่อเต็มจอ</p>
+
+        <div id="layerPanel" class="layer-panel" hidden>
+          <div class="layer-tabs" id="layerTabs"></div>
+          <div class="row wrap-tight">
+            <button class="btn small" data-pos="full">เต็มจอ</button>
+            <button class="btn small" data-pos="center">กลาง</button>
+            <button class="btn small" data-pos="left">ครึ่งซ้าย</button>
+            <button class="btn small" data-pos="right">ครึ่งขวา</button>
+            <button class="btn small" data-pos="tl">↖</button>
+            <button class="btn small" data-pos="tr">↗</button>
+            <button class="btn small" data-pos="bl">↙</button>
+            <button class="btn small" data-pos="br">↘</button>
+          </div>
+          <div class="row wrap-tight">
+            <button id="lyFront" class="btn small">⬆ ไว้บนสุด</button>
+            <button id="lyBack" class="btn small">⬇ ไว้ล่างสุด</button>
+            <button id="lyHide" class="btn small">ซ่อน</button>
+            <button id="lyRemove" class="btn small danger-text">ลบ</button>
+          </div>
+
+          <div id="cropBox" class="sub-box">
+            <div class="sub-title">ตัดขอบภาพจอ</div>
+            <label class="field">ตัดหัวหน้าต่าง (แถบชื่อด้านบน) <span id="cropTopLabel" class="muted small"></span>
+              <input id="cropTop" type="range" min="0" max="120" value="0">
+            </label>
+            <div class="row wrap-tight">
+              <button id="cropAuto" class="btn small">✂ ตัดหัวหน้าต่าง + ขอบดำอัตโนมัติ</button>
+              <button id="cropReset" class="btn small">คืนค่าเดิม</button>
+            </div>
+          </div>
+
+          <div id="shapeBox" class="sub-box" hidden>
+            <div class="sub-title">รูปทรงกล้อง</div>
+            <div class="row wrap-tight">
+              <button class="btn small" data-shape="rect">สี่เหลี่ยม</button>
+              <button class="btn small" data-shape="round">มุมมน</button>
+              <button class="btn small" data-shape="circle">วงกลม</button>
+            </div>
+          </div>
+        </div>
+
+        <label class="field">ข้อความแถบล่าง
+          <input id="banner" type="text" maxlength="120" placeholder="เช่น โปรวันนี้ ลด 50% 🔥">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>กล้อง &amp; ฟิลเตอร์</h2>
+        <label class="field">กล้องที่ใช้
+          <select id="camSelect"><option value="">ค่าเริ่มต้น</option></select>
+        </label>
+        <div class="field">ฟิลเตอร์</div>
+        <div id="fxPresets" class="chips fx-chips"></div>
+        <div class="grid2">
+          <label class="field">หน้าเนียน <span class="muted small" data-out="smooth"></span>
+            <input type="range" min="0" max="100" data-fx="smooth">
+          </label>
+          <label class="field">ผิวสว่าง <span class="muted small" data-out="glow"></span>
+            <input type="range" min="0" max="100" data-fx="glow">
+          </label>
+          <label class="field">ความสว่าง <span class="muted small" data-out="bright"></span>
+            <input type="range" min="-50" max="50" data-fx="bright">
+          </label>
+          <label class="field">คอนทราสต์ <span class="muted small" data-out="contrast"></span>
+            <input type="range" min="-50" max="50" data-fx="contrast">
+          </label>
+          <label class="field">ความสดของสี <span class="muted small" data-out="sat"></span>
+            <input type="range" min="-100" max="100" data-fx="sat">
+          </label>
+          <label class="field">โทนเย็น ↔ อุ่น <span class="muted small" data-out="warm"></span>
+            <input type="range" min="-100" max="100" data-fx="warm">
+          </label>
+        </div>
+        <div class="row">
+          <label class="check small"><input id="fxMirror" type="checkbox" checked> กลับด้านเหมือนกระจก</label>
+          <label class="check small"><input id="fxCompare" type="checkbox"> ดูภาพก่อนปรับ</label>
+          <button id="fxReset" class="btn small">รีเซ็ต</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>เสียง</h2>
+        <div class="grid2">
+          <label class="field">ไมโครโฟน
+            <select id="micSelect"><option value="">ไม่ใช้ไมค์</option></select>
+          </label>
+          <label class="field">ระดับไมค์ <span id="micVolLabel" class="muted small">100%</span>
+            <input id="micVol" type="range" min="0" max="200" value="100">
+          </label>
+        </div>
+        <div class="meter"><div id="meterBar"></div></div>
+        <p class="muted small">เสียงจากหน้าจอ/แท็บจะรวมเข้ามาอัตโนมัติ ถ้าติ๊ก “แชร์เสียง” ตอนเลือกจอ · จอ iPhone ผ่าน AirPlay จะเล่นเสียงออกลำโพงคอม ให้เลือก “หน้าจอทั้งหมด” + แชร์เสียงระบบ ถ้าต้องการเสียงจาก iPhone</p>
+      </section>
+    </div>
+
+    <!-- ขวา: ปลายทาง + บิตเรต + สถานะ -->
+    <div class="col">
+      <section class="card">
+        <h2>ปลายทางไลฟ์</h2>
+        <div id="destList" class="dest-list"></div>
+        <div class="row">
+          <select id="addPlatform" aria-label="เลือกแพลตฟอร์ม"></select>
+          <button id="btnAdd" class="btn">+ เพิ่ม</button>
+        </div>
+        <label class="check small"><input id="rememberKeys" type="checkbox"> จำ Stream Key ไว้ในเบราว์เซอร์เครื่องนี้</label>
+      </section>
+
+      <section class="card">
+        <h2>คำนวณบิตเรต</h2>
+        <div class="grid2">
+          <label class="field">ความเร็วอัปโหลด (Mbps)
+            <div class="row nowrap">
+              <input id="upload" type="number" min="0.5" step="0.1" value="10">
+              <button id="btnSpeed" class="btn small">ทดสอบ</button>
+            </div>
+          </label>
+          <label class="field">แนวภาพ
+            <select id="orient">
+              <option value="h">แนวนอน 16:9 (YouTube, Facebook, Twitch)</option>
+              <option value="v">แนวตั้ง 9:16 (TikTok, Reels, จอ iPhone)</option>
+            </select>
+          </label>
+        </div>
+        <div id="calc" class="calc"></div>
+        <label class="check small"><input id="manual" type="checkbox"> ตั้งค่าเอง</label>
+        <div id="manualBox" class="grid2" hidden>
+          <label class="field">ความละเอียด
+            <select id="res">
+              <option value="1080">1080p</option><option value="720">720p</option><option value="540">540p</option><option value="360">360p</option>
+            </select>
+          </label>
+          <label class="field">เฟรมเรต
+            <select id="fps"><option>30</option><option>60</option><option>25</option></select>
+          </label>
+          <label class="field">วิดีโอ (kbps)
+            <input id="vkbps" type="number" min="300" max="20000" step="100" value="4500">
+          </label>
+          <label class="field">เสียง (kbps)
+            <select id="akbps"><option>160</option><option>128</option><option>192</option><option>96</option></select>
+          </label>
+        </div>
+        <label class="field">ตัวเข้ารหัส
+          <select id="encoder"><option value="">กำลังตรวจ…</option></select>
+        </label>
+      </section>
+
+      <button id="btnLive" class="btn primary big">เริ่มไลฟ์</button>
+
+      <section class="card">
+        <h2>สุขภาพสตรีม</h2>
+        <div class="stats">
+          <div><span class="muted small">เฟรมเรต</span><b id="stFps">–</b></div>
+          <div><span class="muted small">บิตเรตจริง</span><b id="stKbps">–</b></div>
+          <div><span class="muted small">ความเร็วเข้ารหัส</span><b id="stSpeed">–</b></div>
+          <div><span class="muted small">เฟรมตก</span><b id="stDrop">–</b></div>
+        </div>
+        <div id="destStatus" class="chips"></div>
+        <p id="advice" class="advice" hidden></p>
+        <details>
+          <summary class="small">บันทึกจาก FFmpeg</summary>
+          <pre id="log" class="log"></pre>
+        </details>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="beauty.js"></script>
+  <script src="studio.js"></script>
+  <script src="mirror-control.js"></script>
+</body>
+</html>

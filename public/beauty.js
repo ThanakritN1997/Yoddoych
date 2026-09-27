@@ -1,0 +1,113 @@
+// ฟิลเตอร์กล้อง + หน้าเนียน ประมวลผลด้วย WebGL (การ์ดจอ)
+// หน้าเนียน = bilateral filter (เบลอเฉพาะพื้นที่สีใกล้กัน ขอบตา/คิ้ว/ปากยังคม) ผสมเฉพาะบริเวณที่เป็นสีผิว
+const FX_PRESETS = {
+  normal: { name: 'ปกติ', bright: 0, contrast: 0, sat: 0, warm: 0, sepia: 0, vignette: 0 },
+  vivid: { name: 'สดใส', bright: 0.05, contrast: 0.12, sat: 0.35, warm: 0.05, sepia: 0, vignette: 0 },
+  soft: { name: 'ละมุน', bright: 0.08, contrast: -0.15, sat: -0.1, warm: 0.1, sepia: 0, vignette: 0.1 },
+  warm: { name: 'อบอุ่น', bright: 0.03, contrast: 0.05, sat: 0.1, warm: 0.4, sepia: 0, vignette: 0 },
+  cool: { name: 'เย็น', bright: 0.02, contrast: 0.05, sat: 0, warm: -0.4, sepia: 0, vignette: 0 },
+  vintage: { name: 'วินเทจ', bright: 0, contrast: -0.1, sat: -0.2, warm: 0.15, sepia: 0.45, vignette: 0.5 },
+  mono: { name: 'ขาวดำ', bright: 0, contrast: 0.18, sat: -1, warm: 0, sepia: 0, vignette: 0.2 },
+};
+
+class CameraFX {
+  constructor() {
+    this.params = { smooth: 0.4, glow: 0.2, mirror: true, ...FX_PRESETS.normal };
+    this.canvas = document.createElement('canvas');
+    const gl = this.canvas.getContext('webgl', { premultipliedAlpha: false, preserveDrawingBuffer: true });
+    this.gl = gl;
+    if (!gl) return;
+
+    const vs = `attribute vec2 p; varying vec2 uv; uniform float mirror;
+      void main(){ uv = vec2(mirror > 0.5 ? 1.0 - (p.x*0.5+0.5) : p.x*0.5+0.5, 0.5 - p.y*0.5); gl_Position = vec4(p,0.,1.); }`;
+    const fs = `precision mediump float;
+      varying vec2 uv; uniform sampler2D tex; uniform vec2 px;
+      uniform float smoothAmt, glow, bright, contrast, sat, warm, sepia, vignette;
+      float skin(vec3 c){
+        float y = dot(c, vec3(.299,.587,.114));
+        float cb = (c.b - y) * .564 + .5;
+        float cr = (c.r - y) * .713 + .5;
+        return smoothstep(.27,.32,cb) * (1. - smoothstep(.49,.54,cb)) * smoothstep(.50,.54,cr) * (1. - smoothstep(.67,.72,cr));
+      }
+      void main(){
+        vec3 c = texture2D(tex, uv).rgb;
+        float m = skin(c);
+        if (smoothAmt > 0.01) {
+          vec3 sum = vec3(0.); float ws = 0.;
+          float spread = 1. + smoothAmt * 2.5;
+          float colorK = mix(80., 8., smoothAmt); // ยิ่งปรับมาก ยิ่งยอมเบลอรอยที่สีต่างมากขึ้น
+          for (int i = -4; i <= 4; i++) for (int j = -4; j <= 4; j++) {
+            vec2 o = vec2(float(i), float(j));
+            vec3 s = texture2D(tex, uv + o * px * spread).rgb;
+            vec3 d = s - c;
+            float w = exp(-dot(o,o) / 18. - dot(d,d) * colorK);
+            sum += s * w; ws += w;
+          }
+          c = mix(c, sum / ws, clamp(m * smoothAmt * 1.3, 0., 1.));
+        }
+        // ผิวสว่าง: screen blend เฉพาะผิว
+        c = mix(c, 1. - (1. - c) * (1. - c * .5), m * glow * .8);
+        c += bright * .3;
+        c = (c - .5) * (1. + contrast) + .5;
+        float g = dot(c, vec3(.299,.587,.114));
+        c = mix(vec3(g), c, 1. + sat);
+        c.r += warm * .08; c.b -= warm * .08;
+        vec3 sp = vec3(dot(c, vec3(.393,.769,.189)), dot(c, vec3(.349,.686,.168)), dot(c, vec3(.272,.534,.131)));
+        c = mix(c, sp, sepia);
+        c *= 1. - vignette * smoothstep(.35, .8, distance(uv, vec2(.5)));
+        gl_FragColor = vec4(clamp(c, 0., 1.), 1.);
+      }`;
+    const sh = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    this.prog = prog;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.u = {};
+    for (const n of ['px', 'mirror', 'smoothAmt', 'glow', 'bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette']) this.u[n] = gl.getUniformLocation(prog, n);
+  }
+
+  // คืน canvas ที่ประมวลผลแล้ว (ย่อไม่เกิน 1280 กว้าง เพื่อให้ลื่น)
+  process(video) {
+    const gl = this.gl;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!gl || !vw) return null;
+    const scale = Math.min(1, 1280 / vw);
+    const w = Math.round(vw * scale);
+    const h = Math.round(vh * scale);
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+      gl.viewport(0, 0, w, h);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
+    const p = this.params;
+    gl.uniform2f(this.u.px, 1 / w, 1 / h);
+    gl.uniform1f(this.u.mirror, p.mirror ? 1 : 0);
+    gl.uniform1f(this.u.smoothAmt, p.smooth);
+    gl.uniform1f(this.u.glow, p.glow);
+    for (const k of ['bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette']) gl.uniform1f(this.u[k], p[k]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return this.canvas;
+  }
+}

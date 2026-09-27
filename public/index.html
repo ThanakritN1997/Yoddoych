@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <title>สะท้อนหน้าจอ</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <a href="./" class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2" y="4" width="13" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="16" y="8" width="6" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 18h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      สะท้อนหน้าจอ
+    </a>
+    <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
+  </header>
+
+  <!-- หน้าแรก -->
+  <main id="home" class="view">
+    <h1>แชร์หน้าจอโทรศัพท์ให้คนอื่นดู</h1>
+    <p class="lead">ใช้ได้ทั้ง iPhone, Android และคอมพิวเตอร์ ผ่านเว็บเบราว์เซอร์ ไม่ต้องลงแอป</p>
+
+    <div class="cards">
+      <section class="card">
+        <h2>ฉันจะแชร์</h2>
+        <p>สร้างห้อง แล้วส่งรหัสหรือ QR ให้คนดู</p>
+        <button id="btnCreate" class="btn primary">สร้างห้องแชร์</button>
+      </section>
+      <section class="card">
+        <h2>ไลฟ์สตรีม</h2>
+        <p>ไลฟ์พร้อมกันหลายช่องทาง (YouTube, Facebook, TikTok…) พร้อมคำนวณบิตเรต</p>
+        <a href="studio.html" class="btn primary">เปิดสตูดิโอไลฟ์</a>
+      </section>
+      <section class="card">
+        <h2>ฉันจะดู</h2>
+        <p>ใส่รหัสห้อง 6 หลักที่ได้จากผู้แชร์</p>
+        <form id="joinForm" class="row">
+          <input id="roomInput" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" autocomplete="off" required>
+          <button class="btn">เข้าดู</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <!-- ผู้แชร์ -->
+  <main id="share" class="view" hidden>
+    <div class="room-bar">
+      <div>
+        <div class="muted">รหัสห้อง</div>
+        <div id="roomCode" class="code">------</div>
+      </div>
+      <div id="qr" class="qr" aria-label="QR สำหรับเข้าดู"></div>
+      <div class="room-meta">
+        <button id="btnCopy" class="btn small">คัดลอกลิงก์</button>
+        <div class="muted"><span id="viewerCount">0</span> คนกำลังดู</div>
+      </div>
+    </div>
+
+    <section id="mirrorCard" class="card highlight mirror-card" hidden>
+      <div class="mirror-head">
+        <h2>สะท้อนหน้าจอ iPhone สด <span class="tag">AirPlay</span></h2>
+        <span id="mirrorState" class="mstate off">ปิดอยู่</span>
+      </div>
+      <div class="row">
+        <button id="btnMirror" class="btn primary">▶ เริ่มสะท้อนหน้าจอ</button>
+        <button id="btnUseMirror" class="btn" data-target="btnLive" hidden>แชร์จอ iPhone ให้คนดู</button>
+      </div>
+      <ol class="steps">
+        <li>กด <b>เริ่มสะท้อนหน้าจอ</b></li>
+        <li>บน iPhone เปิด <b>ศูนย์ควบคุม</b> → กด <b>การสะท้อนหน้าจอ</b> → เลือก <b>PC-Mirror</b></li>
+        <li>กด <b>แชร์จอ iPhone ให้คนดู</b> → แท็บ <b>หน้าต่าง</b> → เลือก <b>UxPlay</b></li>
+      </ol>
+      <p class="muted small">iPhone ต้องต่อ Wi-Fi วงเดียวกับคอม · เปิดหน้านี้ใน Chrome หรือ Edge บนคอม</p>
+    </section>
+
+    <section class="card">
+      <h2>1. ส่งภาพหน้าจอ <span class="tag">iPhone · Android</span></h2>
+      <p>แคปหน้าจอโทรศัพท์ก่อน แล้วกดปุ่มด้านล่างเพื่อเลือกภาพ — คนดูจะเห็นทันที</p>
+      <ul class="hint">
+        <li><b>iPhone:</b> กดปุ่มด้านข้าง + ปุ่มเพิ่มเสียงพร้อมกัน</li>
+        <li><b>Android:</b> กดปุ่มเปิด/ปิด + ปุ่มลดเสียงพร้อมกัน</li>
+      </ul>
+      <label class="btn primary file">
+        เลือกภาพหน้าจอ
+        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      </label>
+      <p id="sendStatus" class="muted small"></p>
+    </section>
+
+    <section class="card">
+      <h2>2. สะท้อนหน้าจอสด <span class="tag">คอมพิวเตอร์ · หน้าต่าง iPhone</span></h2>
+      <p id="liveHelp">แชร์หน้าต่าง UxPlay (จอ iPhone) หรือหน้าจอคอม แบบเรียลไทม์</p>
+      <div class="row">
+        <button id="btnLive" class="btn primary">เริ่มแชร์หน้าจอสด</button>
+        <button id="btnStop" class="btn danger" hidden>หยุดแชร์</button>
+      </div>
+      <video id="preview" class="preview" muted playsinline autoplay hidden></video>
+    </section>
+
+    <details class="card">
+      <summary>อยากสะท้อนหน้าจอมือถือแบบสด ๆ ทำยังไง?</summary>
+      <p>เบราว์เซอร์บนมือถือ (Safari / Chrome) ยังไม่อนุญาตให้เว็บจับภาพหน้าจอสด วิธีที่ใช้ได้คือสะท้อนมือถือขึ้นคอมก่อน แล้วใช้หน้านี้บนคอมแชร์หน้าต่างนั้นต่อ:</p>
+      <ul class="hint">
+        <li><b>iPhone:</b> ใช้ “การสะท้อนหน้าจอ” ไปที่ PC-Mirror (ตั้งไว้แล้วใน start.bat)</li>
+        <li><b>Android:</b> ใช้ scrcpy (ฟรี) ต่อสาย USB หรือ Wi-Fi ขึ้นคอม</li>
+        <li>จากนั้นกด “เริ่มแชร์หน้าจอสด” แล้วเลือกหน้าต่างมือถือ</li>
+      </ul>
+    </details>
+  </main>
+
+  <!-- ผู้ชม -->
+  <main id="watch" class="view" hidden>
+    <div class="watch-bar">
+      <div>ห้อง <b id="watchRoom"></b> · <span id="watchState" class="muted">รอผู้แชร์…</span></div>
+      <button id="btnFull" class="btn small">เต็มจอ</button>
+    </div>
+    <div id="stage" class="stage">
+      <video id="remote" playsinline autoplay muted hidden></video>
+      <img id="shot" alt="ภาพหน้าจอที่ถูกแชร์" hidden>
+      <div id="empty" class="empty">ยังไม่มีภาพ — รอผู้แชร์ส่งหน้าจอ</div>
+    </div>
+    <div id="history" class="history" aria-label="ภาพก่อนหน้า"></div>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+  <script src="mirror-control.js"></script>
+</body>
+</html>
