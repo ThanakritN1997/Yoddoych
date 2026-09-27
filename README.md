@@ -15,6 +15,23 @@
   - เข้ารหัสครั้งเดียวด้วย FFmpeg (รองรับ NVENC / QSV / AMF / x264) แล้วส่ง RTMP/RTMPS ไปทุกปลายทางพร้อมกัน
     แต่ละปลายทางมีคิวแยกและต่อใหม่อัตโนมัติ
 
+## ใช้ผ่านเว็บออนไลน์ + Yoddoy Helper
+
+หน้าเว็บเปิดได้ทุกที่ที่ https://yoddoych.vercel.app/studio.html — ภาพ ฟิลเตอร์ และการจัดวางทำงานในเบราว์เซอร์
+ส่วน **การส่งไลฟ์ (FFmpeg)** และ **การสะท้อนจอ iPhone (UxPlay)** ต้องรันบนเครื่องของผู้ใช้ผ่าน **Yoddoy Helper**
+
+- ดาวน์โหลด `YoddoyHelper-win64.zip` จาก [Releases](https://github.com/ThanakritN1997/Yoddoych/releases/latest) → แตกไฟล์ → ดับเบิลคลิก `YoddoyHelper.bat`
+- Helper ฟังที่ `127.0.0.1:47800` เท่านั้น และรับคำสั่งจาก `https://yoddoych.vercel.app` หรือ localhost (ตั้งเพิ่มได้ด้วย env `ALLOWED_ORIGINS`)
+- หน้าเว็บตรวจหา Helper อัตโนมัติ ถ้าไม่พบจะแสดงปุ่มดาวน์โหลด
+
+สร้างแพ็กเกจ Helper ใหม่ (ต้อง build UxPlay ตาม [docs/uxplay-windows.md](docs/uxplay-windows.md) ก่อน):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build-helper.ps1   # → dist\YoddoyHelper-win64.zip
+```
+
+เมื่อรันบน Vercel (มี env `VERCEL`) หรือหลัง proxy (`BEHIND_PROXY=1`) API ของสตูดิโอ/AirPlay จะถูกปิดทั้งหมด
+
 ## ความต้องการ
 
 - Windows 10/11, [Node.js](https://nodejs.org) 18+

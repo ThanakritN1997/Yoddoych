@@ -1,9 +1,8 @@
 @echo off
-chcp 65001 >nul
+rem Keep this file ASCII-only: cmd.exe misparses batch files that contain multi-byte text.
+rem Starts the web server. The "Start mirroring" button in the page launches the AirPlay receiver (PC-Mirror).
 cd /d "%~dp0"
 title Screen Mirror
-
-rem เปิดเว็บ (ปุ่ม "เริ่มสะท้อนหน้าจอ" ในหน้าเว็บจะเปิดตัวรับ AirPlay "PC-Mirror" ให้เอง)
 if not exist node_modules call npm install
 start "" http://localhost:3000/studio.html
 node server.js

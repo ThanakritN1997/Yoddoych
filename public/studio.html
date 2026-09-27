@@ -25,6 +25,24 @@
     <button id="btnCopyUrl" class="btn small">คัดลอกลิงก์</button>
   </div>
 
+  <section id="helperCard" class="helper-card" hidden>
+    <div id="helperDesktop">
+      <h2>ติดตั้ง Yoddoy Helper บนเครื่องนี้ (ครั้งเดียว)</h2>
+      <p>ตัวช่วยนี้ทำให้ <b>ไลฟ์ไปทุกแพลตฟอร์ม</b> และ <b>สะท้อนจอ iPhone (AirPlay)</b> ได้ — ภาพ ฟิลเตอร์ และการจัดวางใช้ได้เลยโดยไม่ต้องติดตั้ง</p>
+      <ol class="steps">
+        <li><a id="helperDownload" class="btn primary small" href="#">⬇ ดาวน์โหลด Yoddoy Helper (Windows)</a></li>
+        <li>แตกไฟล์ zip → ดับเบิลคลิก <b>YoddoyHelper.bat</b></li>
+        <li>ถ้า Windows ถามเรื่อง Firewall ให้กด <b>อนุญาต</b> (ติ๊ก Private network)</li>
+        <li>กลับมาที่หน้านี้ — ระบบจะเชื่อมต่อให้อัตโนมัติ</li>
+      </ol>
+      <p class="muted small">อยากให้เปิดเองทุกครั้งที่เปิดคอม: ดับเบิลคลิก <b>install-autostart.bat</b> ในโฟลเดอร์เดียวกัน · ใช้ได้กับ Chrome และ Edge</p>
+    </div>
+    <div id="helperMobile" hidden>
+      <h2>ใช้บนมือถือ</h2>
+      <p>มือถือใช้กล้อง ฟิลเตอร์ และจัดภาพได้ แต่การ <b>ส่งไลฟ์</b> และ <b>สะท้อนจอ iPhone</b> ต้องทำบนคอม Windows ที่ติดตั้ง Yoddoy Helper</p>
+    </div>
+  </section>
+
   <main class="studio">
     <!-- ซ้าย: ภาพ + แหล่งภาพ/เสียง -->
     <div class="col">
@@ -227,6 +245,7 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="helper.js"></script>
   <script src="beauty.js"></script>
   <script src="studio.js"></script>
   <script src="mirror-control.js"></script>

@@ -148,7 +148,8 @@ $('btnSpeed').onclick = async () => {
   b.disabled = true;
   b.textContent = 'กำลังวัด…';
   try {
-    const r = await fetch('/api/speedtest', { method: 'POST' }).then((r) => r.json());
+    if (!H) throw new Error('ต้องติดตั้ง Yoddoy Helper ก่อน หรือใส่ความเร็วเอง');
+    const r = await fetch(H.base + '/api/speedtest', { method: 'POST' }).then((r) => r.json());
     if (r.error) throw new Error(r.error);
     $('upload').value = r.uploadMbps;
     toast(`อัปโหลด ${r.uploadMbps} Mbps`);
@@ -160,14 +161,29 @@ $('btnSpeed').onclick = async () => {
   b.textContent = 'ทดสอบ';
 };
 
-fetch('/api/encoders').then((r) => r.json()).then((r) => {
+let H = null; // Yoddoy Helper บนเครื่องนี้ { base, ws, version }
+
+function loadEncoders() {
+  fetch(H.base + '/api/encoders').then((r) => r.json()).then((r) => {
+    const sel = $('encoder');
+    sel.innerHTML = '';
+    if (!r.ffmpeg || !r.encoders.length) sel.add(new Option('ไม่พบ FFmpeg', ''));
+    r.encoders.forEach((e) => sel.add(new Option(e.label, e.id)));
+    if (q.encoder && r.encoders.some((e) => e.id === q.encoder)) sel.value = q.encoder;
+    calc();
+  }).catch(() => toast('ติดต่อ Yoddoy Helper ไม่ได้'));
+}
+
+function showHelperMissing() {
+  $('helperCard').hidden = false;
+  $('helperDownload').href = window.HELPER_DOWNLOAD;
+  $('helperMobile').hidden = !window.IS_MOBILE;
+  $('helperDesktop').hidden = window.IS_MOBILE;
   const sel = $('encoder');
   sel.innerHTML = '';
-  if (!r.ffmpeg || !r.encoders.length) sel.add(new Option('ไม่พบ FFmpeg', ''));
-  r.encoders.forEach((e) => sel.add(new Option(e.label, e.id)));
-  if (q.encoder && r.encoders.some((e) => e.id === q.encoder)) sel.value = q.encoder;
-  calc();
-}).catch(() => toast('ต้องเปิดสตูดิโอบนคอมที่รันเซิร์ฟเวอร์ (localhost)'));
+  sel.add(new Option('ต้องมี Yoddoy Helper', ''));
+  $('conn').textContent = 'ไม่พบ Helper';
+}
 
 // ---------- ผสมภาพบน canvas (เลเยอร์ลาก/ย่อขยายได้) ----------
 const canvas = $('canvas');
@@ -757,7 +773,7 @@ let clock = null;
 let slowSince = 0;
 
 function connect() {
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/studio');
+  ws = new WebSocket(H.ws + '/studio');
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { $('conn').textContent = 'พร้อมไลฟ์'; $('conn').classList.add('on'); };
   ws.onclose = () => {
@@ -840,7 +856,12 @@ async function startLive() {
   if (!active.length) return toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
   const missing = active.find((d) => !d.url || !d.key);
   if (missing) return toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
-  if (!ws || ws.readyState !== WebSocket.OPEN) return toast('ยังไม่ได้เชื่อมต่อเซิร์ฟเวอร์');
+  if (!H) {
+    showHelperMissing();
+    $('helperCard').scrollIntoView({ behavior: 'smooth' });
+    return toast('ต้องติดตั้งและเปิด Yoddoy Helper บนเครื่องนี้ก่อนไลฟ์');
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return toast('ยังไม่ได้เชื่อมต่อ Yoddoy Helper');
   await actx.resume();
 
   ticker.postMessage(plan.fps);
@@ -905,4 +926,15 @@ window.addEventListener('beforeunload', (e) => {
 
 renderDests();
 calc();
-connect();
+window.helper.then((h) => {
+  H = h;
+  if (!h) return showHelperMissing();
+  connect();
+  loadEncoders();
+});
+// ติดตั้ง Helper เสร็จแล้วกลับมาที่แท็บนี้ → ลองหาใหม่อัตโนมัติ
+window.addEventListener('focus', async () => {
+  if (H || window.IS_MOBILE) return;
+  const h = await findHelper();
+  if (h) location.reload();
+});

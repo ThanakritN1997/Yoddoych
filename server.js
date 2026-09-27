@@ -7,7 +7,7 @@ const { WebSocketServer } = require('ws');
 const studio = require('./studio-server');
 const mirror = require('./mirror-server');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || (process.env.HELPER ? 47800 : 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -18,11 +18,46 @@ const MIME = {
   '.json': 'application/json',
 };
 
-const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const VERSION = require('./package.json').version;
+// เว็บที่อนุญาตให้สั่ง Helper บนเครื่องนี้ได้ (นอกจาก localhost)
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://yoddoych.vercel.app').split(',').map((s) => s.trim()).filter(Boolean);
+// บน Vercel/โฮสต์ที่มี proxy คำขอจะมาจาก 127.0.0.1 เสมอ → ปิดสตูดิโอ/API ทั้งหมด
+const BEHIND_PROXY = !!(process.env.VERCEL || process.env.BEHIND_PROXY);
+
+function originAllowed(origin) {
+  if (!origin) return true; // เปิดตรงจากแถบที่อยู่ หรือเครื่องมือบนเครื่อง
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const isLocal = (req) =>
+  !BEHIND_PROXY &&
+  !req.headers['x-forwarded-for'] &&
+  ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) &&
+  originAllowed(req.headers.origin);
+
+function cors(req, res) {
+  const origin = req.headers.origin;
+  if (!origin || !originAllowed(origin)) return;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true'); // Chrome: เว็บ https เรียก localhost
+}
 
 const server = http.createServer(async (req, res) => {
   if (req.url.startsWith('/api/')) {
     if (!isLocal(req)) return res.writeHead(403).end();
+    cors(req, res);
+    if (req.method === 'OPTIONS') return res.writeHead(204).end();
+    if (req.url === '/api/helper') {
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ helper: true, version: VERSION }));
+    }
     const api = req.url.startsWith('/api/mirror') ? mirror : studio;
     if ((await api.handleApi(req, res)) === false) res.writeHead(404).end();
     return;
@@ -154,7 +189,14 @@ setInterval(() => {
   }
 }, 30000);
 
-server.listen(PORT, () => {
+server.listen(PORT, process.env.HELPER ? '127.0.0.1' : undefined, () => {
+  if (process.env.HELPER) {
+    console.log(`\nYoddoy Helper ${VERSION} ทำงานแล้ว — เปิดหน้าต่างนี้ทิ้งไว้ระหว่างใช้งาน`);
+    console.log(`  เปิดสตูดิโอ: ${ALLOWED_ORIGINS[0]}/studio.html`);
+    console.log(`  (หรือใช้ในเครื่อง: http://localhost:${PORT}/studio.html)\n`);
+    setTimeout(() => console.log('  ตัวเข้ารหัสที่ใช้ได้: ' + studio.detectEncoders().map((e) => e.id).join(', ')), 100);
+    return;
+  }
   console.log(`\nเว็บสะท้อนหน้าจอพร้อมใช้งาน`);
   console.log(`  เครื่องนี้:      http://localhost:${PORT}`);
   console.log(`  สตูดิโอไลฟ์:    http://localhost:${PORT}/studio.html`);

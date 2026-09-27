@@ -5,8 +5,23 @@ const os = require('os');
 const path = require('path');
 
 const UXPLAY_DIR = process.env.UXPLAY_DIR || 'C:\\msys64\\ucrt64\\bin';
-const UXPLAY = path.join(UXPLAY_DIR, 'uxplay.exe');
 const NAME = process.env.MIRROR_NAME || 'PC-Mirror';
+const IMAGES = ['uxplay.exe', 'uxplay-mdns.exe'];
+
+// เครื่องที่มี Bonjour ต้องใช้รุ่นที่ประกาศชื่อผ่าน Bonjour (ตัวในตัวจะแย่งพอร์ต 5353 ไม่ได้)
+// เครื่องที่ไม่มี Bonjour ใช้รุ่น mDNS ในตัว (uxplay-mdns.exe) ถ้ามี
+function bonjourRunning() {
+  const r = spawnSync('sc', ['query', 'Bonjour Service'], { windowsHide: true, encoding: 'utf8' });
+  return /RUNNING/.test(r.stdout || '');
+}
+function pickUxplay() {
+  const bonjour = path.join(UXPLAY_DIR, 'uxplay.exe');
+  const mdns = path.join(UXPLAY_DIR, 'uxplay-mdns.exe');
+  if (!bonjourRunning() && fs.existsSync(mdns)) return mdns;
+  return bonjour;
+}
+const installed = () => IMAGES.some((f) => fs.existsSync(path.join(UXPLAY_DIR, f)));
+const killAll = () => IMAGES.forEach((f) => spawnSync('taskkill', ['/IM', f, '/F'], { windowsHide: true }));
 
 let proc = null;
 let state = { connected: 0, device: '', streaming: false, lastLine: '' };
@@ -23,8 +38,8 @@ function lanMac() {
 }
 
 function externalRunning() {
-  const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq uxplay.exe', '/NH'], { windowsHide: true, encoding: 'utf8' });
-  return /uxplay\.exe/i.test(r.stdout || '');
+  const r = spawnSync('tasklist', ['/NH'], { windowsHide: true, encoding: 'utf8' });
+  return /uxplay(-mdns)?\.exe/i.test(r.stdout || '');
 }
 
 function onLine(line) {
@@ -43,9 +58,10 @@ function onLine(line) {
 
 function start() {
   if (proc) return status();
-  if (!fs.existsSync(UXPLAY)) return { ...status(), error: 'ไม่พบ uxplay.exe ที่ ' + UXPLAY };
+  if (!installed()) return { ...status(), error: 'ไม่พบ UxPlay ที่ ' + UXPLAY_DIR };
   // ปิดตัวที่เปิดค้างไว้ (เช่นจาก start.bat เดิม) เพื่อไม่ให้พอร์ตชนกัน
-  spawnSync('taskkill', ['/IM', 'uxplay.exe', '/F'], { windowsHide: true });
+  killAll();
+  const UXPLAY = pickUxplay();
 
   const args = ['-n', NAME, '-nh', '-p', '-nohold', '-vs', 'd3d12videosink'];
   const mac = lanMac();
@@ -80,13 +96,13 @@ function start() {
 function stop() {
   if (proc) proc.kill();
   proc = null;
-  spawnSync('taskkill', ['/IM', 'uxplay.exe', '/F'], { windowsHide: true });
+  killAll();
   return status();
 }
 
 function status() {
   return {
-    installed: fs.existsSync(UXPLAY),
+    installed: installed(),
     running: !!proc,
     external: !proc && externalRunning(),
     name: NAME,

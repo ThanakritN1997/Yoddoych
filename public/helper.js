@@ -1,0 +1,22 @@
+// หา "Yoddoy Helper" (โปรแกรมตัวช่วยบนเครื่องนี้ที่มี FFmpeg + UxPlay)
+// - เปิดเว็บจากเครื่องที่รันเซิร์ฟเวอร์เอง (localhost) → ใช้ที่เดียวกัน
+// - เปิดจากเว็บออนไลน์ (เช่น Vercel) → ลองต่อ Helper ที่ 127.0.0.1:47800
+window.HELPER_PORT = 47800;
+window.HELPER_DOWNLOAD = 'https://github.com/ThanakritN1997/Yoddoych/releases/latest/download/YoddoyHelper-win64.zip';
+window.IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+
+async function findHelper() {
+  const onLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const bases = onLocal ? [location.origin, `http://127.0.0.1:${window.HELPER_PORT}`] : [`http://127.0.0.1:${window.HELPER_PORT}`];
+  for (const base of bases) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 1500);
+      const r = await fetch(base + '/api/helper', { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) return { base, ws: base.replace(/^http/, 'ws'), ...(await r.json()) };
+    } catch {}
+  }
+  return null;
+}
+window.helper = window.IS_MOBILE ? Promise.resolve(null) : findHelper();
