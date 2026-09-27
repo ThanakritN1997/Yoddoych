@@ -8,5 +8,5 @@ if ($LASTEXITCODE -ne 0) { throw 'build-helper.sh ล้มเหลว' }
 
 $zip = Join-Path $root 'dist\YoddoyHelper-win64.zip'
 if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path (Join-Path $root 'dist\YoddoyHelper') -DestinationPath $zip -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $root 'dist\staging\YoddoyHelper') -DestinationPath $zip -CompressionLevel Optimal
 '{0:N1} MB  {1}' -f ((Get-Item $zip).Length / 1MB), $zip

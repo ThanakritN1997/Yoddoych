@@ -3,7 +3,8 @@
 # รันใน MSYS2 UCRT64 หลังจาก build UxPlay ตาม docs/uxplay-windows.md แล้ว
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUT="$ROOT/dist/YoddoyHelper"
+# สร้างในโฟลเดอร์ staging เพื่อไม่ชนกับ Helper ที่อาจเปิดทดสอบอยู่ใน dist/YoddoyHelper
+OUT="$ROOT/dist/staging/YoddoyHelper"
 UX_BONJOUR=${UX_BONJOUR:-$HOME/UxPlay/build-bonjour/uxplay.exe}  # ใช้ Bonjour ของเครื่อง (ถ้ามี)
 UX_MDNS=${UX_MDNS:-$HOME/UxPlay/build/uxplay.exe}                 # mDNS ในตัว (เครื่องที่ไม่มี Bonjour)
 NODE_EXE=${NODE_EXE:-"/c/Program Files/nodejs/node.exe"}
