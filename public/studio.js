@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const PLATFORMS = {
   youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม”' },
   facebook: { name: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', max: 9000, orient: 'h', help: 'Facebook → วิดีโอสด → ซอฟต์แวร์สตรีม → คัดลอก “คีย์สตรีม”' },
-  tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key' },
+  tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key · ไม่มี Stream Key? ใช้ปุ่ม “เปิดจอสำหรับ LIVE Studio” แทน' },
   instagram: { name: 'Instagram', url: '', max: 6000, orient: 'v', help: 'instagram.com บนคอม → สร้าง → วิดีโอสด → คัดลอก Stream URL และ Stream key' },
   twitch: { name: 'Twitch', url: 'rtmp://live.twitch.tv/app', max: 6000, orient: 'h', help: 'Twitch → Creator Dashboard → Settings → Stream → Primary Stream key' },
   kick: { name: 'Kick', url: 'rtmps://fa723fc1b171.global-contribute.live-video.net:443/app', max: 8000, orient: 'h', help: 'Kick → Dashboard → Settings → Stream URL & Key (ตรวจ URL ให้ตรงกับหน้า Kick)' },
@@ -844,6 +844,19 @@ function advise(m) {
 }
 
 $('btnLive').onclick = () => (recorder ? stopLive() : startLive());
+
+// ---------- หน้าต่างภาพสะอาดสำหรับ TikTok LIVE Studio / OBS (Window capture) ----------
+let outputWin = null;
+$('btnOutput').onclick = () => {
+  if (outputWin && !outputWin.closed) return outputWin.focus();
+  // ขนาดหน้าต่างตามแนวภาพ: ด้านยาว ~ 80% ของความสูงจอ
+  const aspect = canvas.width / canvas.height;
+  const maxH = Math.round(screen.availHeight * 0.8);
+  const h = aspect >= 1 ? Math.round(Math.min(maxH, (screen.availWidth * 0.6) / aspect)) : maxH;
+  const w = Math.round(h * aspect);
+  outputWin = window.open('output.html', 'yoddoy-output', `popup=yes,width=${w},height=${h}`);
+  if (!outputWin) toast('เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วกดอีกครั้ง');
+};
 
 function pickMime() {
   const opts = ['video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];

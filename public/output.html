@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yoddoy Output</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+    body.idle { cursor: none; }
+    .msg {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+      color: #cfd5df; font: 16px/1.6 "Noto Sans Thai", system-ui, sans-serif; padding: 16px;
+    }
+  </style>
+</head>
+<body>
+  <!-- หน้าต่างภาพสะอาดสำหรับให้ TikTok LIVE Studio / OBS จับภาพ (Window capture) -->
+  <video id="v" muted autoplay playsinline></video>
+  <div id="msg" class="msg" hidden></div>
+  <script>
+    const v = document.getElementById('v');
+    const msg = document.getElementById('msg');
+    function show(text) {
+      msg.textContent = text;
+      msg.hidden = !text;
+    }
+    function attach() {
+      try {
+        const src = window.opener && window.opener.document.getElementById('canvas');
+        if (!src) return show('เปิดหน้าต่างนี้จากปุ่ม “จอสำหรับ LIVE Studio” ในหน้าสตูดิโอ');
+        v.srcObject = src.captureStream(60);
+        v.play().catch(() => {});
+        show('');
+      } catch {
+        show('เชื่อมกับหน้าสตูดิโอไม่ได้ — ปิดหน้าต่างนี้แล้วกดปุ่มในสตูดิโออีกครั้ง');
+      }
+    }
+    attach();
+    // หน้าสตูดิโอถูกปิด/รีเฟรช → แจ้งเตือน และต่อใหม่เมื่อกลับมา
+    setInterval(() => {
+      if (!window.opener || window.opener.closed) return show('หน้าสตูดิโอถูกปิดแล้ว');
+      const track = v.srcObject && v.srcObject.getVideoTracks()[0];
+      if (!track || track.readyState === 'ended') attach();
+    }, 1000);
+    // ซ่อนเมาส์เมื่อไม่ขยับ จะได้ไม่ติดไปในไลฟ์
+    let t;
+    addEventListener('mousemove', () => {
+      document.body.classList.remove('idle');
+      clearTimeout(t);
+      t = setTimeout(() => document.body.classList.add('idle'), 1500);
+    });
+  </script>
+</body>
+</html>
