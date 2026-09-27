@@ -38,7 +38,7 @@
       <p class="muted small">อยากให้เปิดเองทุกครั้งที่เปิดคอม: ดับเบิลคลิก <b>install-autostart.bat</b> ในโฟลเดอร์เดียวกัน · ใช้ได้กับ Chrome และ Edge</p>
     </div>
     <div id="helperUpdate" hidden>
-      <h2>มี Yoddoy Helper เวอร์ชันใหม่ (แก้ปัญหาไลฟ์หลุด)</h2>
+      <h2>มี Yoddoy Helper เวอร์ชันใหม่ (แก้ไลฟ์หลุด + ตั้งค่าดีเลย์)</h2>
       <p>เครื่องนี้ใช้เวอร์ชัน <b id="helperVer"></b> — ปิดหน้าต่าง Yoddoy Helper เดิม แล้วดาวน์โหลดตัวใหม่มาแตกไฟล์ทับ/แทนที่ แล้วเปิด <b>YoddoyHelper.bat</b> อีกครั้ง</p>
       <a id="helperUpdateLink" class="btn primary small" href="#">⬇ ดาวน์โหลดเวอร์ชันใหม่</a>
     </div>
@@ -242,6 +242,23 @@
         <label class="field">ตัวเข้ารหัส
           <select id="encoder"><option value="">กำลังตรวจ…</option></select>
         </label>
+      </section>
+
+      <section class="card">
+        <h2>ดีเลย์</h2>
+        <div class="grid2">
+          <label class="field">โหมดดีเลย์
+            <select id="latency">
+              <option value="low">ต่ำสุด — ตอบแชทไว (เหมาะกับไลฟ์พูดคุย/ขายของ)</option>
+              <option value="normal" selected>สมดุล — แนะนำ</option>
+              <option value="stable">เสถียร — ภาพคมสุด ทนเน็ตแกว่ง</option>
+            </select>
+          </label>
+          <label class="field">หน่วงเวลาเพิ่ม (วินาที) <span id="delayLabel" class="muted small"></span>
+            <input id="delaySec" type="number" min="0" max="300" step="5" value="0">
+          </label>
+        </div>
+        <div id="latencyInfo" class="calc small"></div>
       </section>
 
       <button id="btnLive" class="btn primary big">เริ่มไลฟ์</button>

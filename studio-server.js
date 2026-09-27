@@ -30,34 +30,47 @@ function detectEncoders() {
   return available;
 }
 
-function videoArgs(enc, kbps, fps) {
+// โหมดดีเลย์: low = หน่วงน้อยสุด (keyframe ทุก 1 วิ, บัฟเฟอร์ 1 วิ, ไม่มี B-frame)
+//             normal = สมดุล · stable = ภาพคมสุด/ทนเน็ตแกว่ง แต่หน่วงกว่า
+const LATENCY = {
+  low: { gopSec: 1, buf: 1, bframes: false },
+  normal: { gopSec: 2, buf: 1.5, bframes: true },
+  stable: { gopSec: 2, buf: 2, bframes: true },
+};
+
+function videoArgs(enc, kbps, fps, latency = 'normal') {
+  const L = LATENCY[latency] || LATENCY.normal;
   const b = `${kbps}k`;
-  const buf = `${kbps * 2}k`;
-  const gop = String(fps * 2); // keyframe ทุก 2 วินาที ตามที่ YouTube/Facebook/TikTok กำหนด
+  const buf = `${Math.round(kbps * L.buf)}k`;
+  const gop = String(fps * L.gopSec); // keyframe ทุก 1–2 วินาที ตามที่ YouTube/Facebook/TikTok กำหนด
   const common = ['-b:v', b, '-maxrate', b, '-bufsize', buf, '-g', gop, '-keyint_min', gop, '-pix_fmt', 'yuv420p'];
+  const noB = L.bframes ? [] : ['-bf', '0'];
   switch (enc) {
     case 'h264_nvenc':
-      return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'll', '-rc', 'cbr', '-profile:v', 'high', '-forced-idr', '1', ...common];
+      return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', latency === 'stable' ? 'hq' : 'll', '-rc', 'cbr', '-profile:v', 'high', '-forced-idr', '1',
+        ...(latency === 'low' ? ['-zerolatency', '1', '-delay', '0'] : []), ...noB, ...common];
     case 'h264_qsv':
-      return ['-c:v', 'h264_qsv', '-preset', 'faster', '-profile:v', 'high', ...common];
+      return ['-c:v', 'h264_qsv', '-preset', 'faster', '-profile:v', 'high', ...(latency === 'low' ? ['-low_delay_brc', '1'] : []), ...noB, ...common];
     case 'h264_amf':
-      return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-profile:v', 'high', ...common];
+      return ['-c:v', 'h264_amf', '-usage', latency === 'stable' ? 'transcoding' : 'lowlatency', '-rc', 'cbr', '-profile:v', 'high', ...noB, ...common];
     default:
-      return ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-profile:v', 'high', '-sc_threshold', '0', '-x264-params', 'nal-hrd=cbr', ...common];
+      return ['-c:v', 'libx264', '-preset', 'veryfast', ...(latency === 'stable' ? [] : ['-tune', 'zerolatency']), '-profile:v', 'high', '-sc_threshold', '0', '-x264-params', 'nal-hrd=cbr', ...noB, ...common];
   }
 }
 
 // ตัวเข้ารหัส: รับ WebM จากเบราว์เซอร์ → บีบอัดครั้งเดียว → MPEG-TS ออกทาง stdout
 // (TS ต่อกลางสตรีมได้ทุกเมื่อ ตัวส่งต่อที่เริ่มใหม่จึงเริ่มอ่านได้ทันที)
 function encoderArgs(cfg) {
-  const { width, height, fps, videoKbps, audioKbps, encoder } = cfg;
+  const { width, height, fps, videoKbps, audioKbps, encoder, latency } = cfg;
   return [
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '1',
-    '-thread_queue_size', '1024', '-fflags', '+genpts', '-i', 'pipe:0',
+    // โหมดดีเลย์ต่ำ: ไม่รอวิเคราะห์ input นาน (รูปแบบจากเบราว์เซอร์รู้อยู่แล้ว)
+    ...(latency === 'low' ? ['-fflags', '+genpts+nobuffer', '-flags', 'low_delay', '-probesize', '256k', '-analyzeduration', '500000'] : ['-fflags', '+genpts']),
+    '-thread_queue_size', '1024', '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a:0',
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps}`,
     '-fps_mode', 'cfr',
-    ...videoArgs(encoder, videoKbps, fps),
+    ...videoArgs(encoder, videoKbps, fps, latency),
     '-bsf:v', 'dump_extra=freq=keyframe', // ใส่ SPS/PPS ทุก keyframe ให้ปลายทางที่ต่อใหม่ถอดรหัสได้
     '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-ar', '48000', '-ac', '2',
     '-f', 'mpegts', '-mpegts_flags', '+resend_headers', '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1',
@@ -141,6 +154,7 @@ function attach() {
       const s = session;
       session = null;
       s.stopped = true;
+      clearInterval(s.delayTimer);
       for (const r of s.relays) {
         clearTimeout(r.timer);
         if (r.proc) r.proc.kill('SIGKILL');
@@ -206,6 +220,8 @@ function attach() {
           videoKbps: Math.min(20000, Math.max(300, msg.videoKbps | 0)),
           audioKbps: [96, 128, 160, 192].includes(msg.audioKbps) ? msg.audioKbps : 160,
           encoder: encs.includes(msg.encoder) ? msg.encoder : encs[0] || 'libx264',
+          latency: LATENCY[msg.latency] ? msg.latency : 'normal',
+          delayMs: Math.min(300, Math.max(0, Number(msg.delaySec) || 0)) * 1000, // หน่วงเพิ่มตั้งใจ สูงสุด 5 นาที
         };
         const secrets = enabled.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
         const s = {
@@ -220,7 +236,7 @@ function attach() {
         s.encoder.stdin.on('error', () => {});
 
         // แจกข้อมูลที่บีบอัดแล้วให้ทุกปลายทาง — ปลายทางที่ค้างจะไม่ฉุดตัวอื่น
-        s.encoder.stdout.on('data', (chunk) => {
+        const distribute = (chunk) => {
           for (const r of s.relays) {
             if (!r.proc || !r.proc.stdin.writable) continue;
             if (r.proc.stdin.writableLength > RELAY_MAX_BUFFER) {
@@ -230,7 +246,18 @@ function attach() {
             }
             r.proc.stdin.write(chunk);
           }
-        });
+        };
+        if (cfg.delayMs > 0) {
+          // หน่วงเวลาเพิ่ม: เก็บข้อมูลไว้ในคิว แล้วค่อยปล่อยเมื่อครบเวลา (ทุกปลายทางหน่วงเท่ากัน)
+          const queue = [];
+          s.encoder.stdout.on('data', (chunk) => queue.push({ t: Date.now(), chunk }));
+          s.delayTimer = setInterval(() => {
+            const due = Date.now() - cfg.delayMs;
+            while (queue.length && queue[0].t <= due) distribute(queue.shift().chunk);
+          }, 50);
+        } else {
+          s.encoder.stdout.on('data', distribute);
+        }
 
         eachLine(s.encoder.stderr, (raw) => {
           const line = s.hide(raw);
@@ -247,7 +274,7 @@ function attach() {
         s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
 
         s.relays.forEach((r) => startRelay(s, r));
-        send({ type: 'started', encoder: cfg.encoder, dests: publicDests() });
+        send({ type: 'started', encoder: cfg.encoder, latency: cfg.latency, delaySec: cfg.delayMs / 1000, dests: publicDests() });
       }
 
       if (msg.type === 'stop') stop('หยุดไลฟ์แล้ว');

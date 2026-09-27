@@ -133,14 +133,34 @@ function calc() {
     ${notes.length ? `<ul class="small">${notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
 
   resizeCanvas(plan.width, plan.height);
-  store.set('quality', { upload: $('upload').value, orient: $('orient').value, manual: $('manual').checked, res: $('res').value, fps: $('fps').value, vkbps: $('vkbps').value, akbps: $('akbps').value, encoder: $('encoder').value });
+  renderLatency();
+  store.set('quality', { upload: $('upload').value, orient: $('orient').value, manual: $('manual').checked, res: $('res').value, fps: $('fps').value, vkbps: $('vkbps').value, akbps: $('akbps').value, encoder: $('encoder').value, latency: $('latency').value, delaySec: $('delaySec').value });
+}
+
+// ---------- ดีเลย์ ----------
+// เวลาที่ส่งชิ้นวิดีโอจากเบราว์เซอร์ (ms) — ยิ่งสั้นยิ่งหน่วงน้อย
+const RECORDER_SLICE = { low: 100, normal: 250, stable: 500 };
+// ดีเลย์ของโปรแกรมเราโดยประมาณ (วินาที) — ไม่รวมดีเลย์ของแพลตฟอร์ม
+const OUR_DELAY = { low: '≈ 0.5–1', normal: '≈ 1–2', stable: '≈ 2–3' };
+const delaySec = () => Math.min(300, Math.max(0, Math.round(Number($('delaySec').value) || 0)));
+
+function renderLatency() {
+  const mode = $('latency').value;
+  const extra = delaySec();
+  $('delayLabel').textContent = extra ? `คนดูจะเห็นช้ากว่าจริง ${extra} วินาที` : '';
+  const yt = { low: 'ความหน่วงต่ำพิเศษ (Ultra-low)', normal: 'ความหน่วงต่ำ (Low)', stable: 'ปกติ (Normal)' }[mode];
+  $('latencyInfo').innerHTML = `
+    <div>ดีเลย์จากโปรแกรมนี้ <b>${OUR_DELAY[mode]} วินาที</b>${extra ? ` + หน่วงเพิ่ม <b>${extra} วินาที</b>` : ''}</div>
+    <div class="muted">ดีเลย์ส่วนใหญ่มาจากแพลตฟอร์ม — ตั้งใน YouTube Studio → การตั้งค่าสตรีม → <b>ความหน่วงของสตรีม: ${yt}</b>
+    (ปกติ ≈ 15–30 วิ · ต่ำ ≈ 5–10 วิ · ต่ำพิเศษ ≈ 2–5 วิ) · Facebook/TikTok ≈ 3–10 วิ ตั้งค่าไม่ได้</div>
+    ${extra ? '<div class="muted">หน่วงเพิ่มใช้กันคนดูไลฟ์แอบส่อง (เช่นเกม ROV) — ทุกแพลตฟอร์มหน่วงเท่ากัน</div>' : ''}`;
 }
 
 const q = store.get('quality', {});
-for (const k of ['upload', 'orient', 'res', 'fps', 'vkbps', 'akbps']) if (q[k]) $(k).value = q[k];
+for (const k of ['upload', 'orient', 'res', 'fps', 'vkbps', 'akbps', 'latency', 'delaySec']) if (q[k] != null && q[k] !== '') $(k).value = q[k];
 $('manual').checked = !!q.manual;
 $('manualBox').hidden = !$('manual').checked;
-for (const id of ['upload', 'orient', 'res', 'fps', 'vkbps', 'akbps', 'encoder']) $(id).addEventListener('input', calc);
+for (const id of ['upload', 'orient', 'res', 'fps', 'vkbps', 'akbps', 'encoder', 'latency', 'delaySec']) $(id).addEventListener('input', calc);
 $('manual').onchange = () => { $('manualBox').hidden = !$('manual').checked; calc(); };
 
 $('btnSpeed').onclick = async () => {
@@ -956,9 +976,11 @@ async function startLive() {
     width: plan.width, height: plan.height, fps: plan.fps,
     videoKbps: plan.videoKbps, audioKbps: plan.audioKbps,
     encoder: $('encoder').value,
+    latency: $('latency').value,
+    delaySec: delaySec(),
     destinations: active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key })),
   }));
-  recorder.start(250);
+  recorder.start(RECORDER_SLICE[$('latency').value] || 250);
 
   liveStart = Date.now();
   $('liveBadge').hidden = false;
@@ -991,7 +1013,7 @@ function stopRecorder(reason) {
 }
 
 function lockSettings(on) {
-  for (const id of ['orient', 'manual', 'res', 'fps', 'vkbps', 'akbps', 'encoder', 'upload', 'btnAdd', 'btnSpeed']) $(id).disabled = on;
+  for (const id of ['orient', 'manual', 'res', 'fps', 'vkbps', 'akbps', 'encoder', 'upload', 'btnAdd', 'btnSpeed', 'latency', 'delaySec']) $(id).disabled = on;
   $('destList').querySelectorAll('input,button').forEach((el) => (el.disabled = on));
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "screen-mirror",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "เว็บสะท้อนหน้าจอ / แชร์ภาพหน้าจอ สำหรับ iPhone, Android และคอมพิวเตอร์",
   "main": "server.js",
   "scripts": {
