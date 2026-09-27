@@ -214,9 +214,23 @@ function contentAspect(l) {
   return Math.max(1, v.videoWidth - c.l - c.r) / Math.max(1, v.videoHeight - c.t - c.b);
 }
 
+// เต็มจออัตโนมัติ: จอแนวตั้งในกรอบแนวตั้ง (เช่น iPhone 19.5:9 ใน 9:16) → "เต็มกรอบ" ไม่มีขอบดำ
+// อื่น ๆ → "พอดีจอ" เห็นภาพครบ
+function autoFull(l) {
+  if (l.userFit) return l.userFit; // ผู้ใช้กดเลือกเองแล้ว → ไม่เปลี่ยนให้
+  const portraitCanvas = canvas.height > canvas.width;
+  return l.kind === 'screen' && portraitCanvas && contentAspect(l) < 1 ? 'fill' : 'full';
+}
+
 function applyPreset(l, pos) {
   const W = canvas.width;
   const H = canvas.height;
+  if (pos === 'fill') {
+    // เต็มกรอบทั้งหมด ครอปส่วนเกินตรงกลาง (ดู drawLayer)
+    Object.assign(l, { pa: W / H, w: 1, x: 0, y: 0, preset: 'fill' });
+    saveLayout();
+    return;
+  }
   const ca = pos === 'full' && l.kind === 'cam' ? W / H : contentAspect(l);
   const m = 0.03;
   l.pa = ca;
@@ -255,9 +269,23 @@ function drawLayer(l) {
   const h = layerH(l) * H;
   if (l.kind === 'screen') {
     const c = l.crop;
-    const sw = v.videoWidth - c.l - c.r;
-    const sh = v.videoHeight - c.t - c.b;
-    if (sw > 0 && sh > 0) ctx2d.drawImage(v, c.l, c.t, sw, sh, x, y, w, h);
+    let sx = c.l;
+    let sy = c.t;
+    let sw = v.videoWidth - c.l - c.r;
+    let sh = v.videoHeight - c.t - c.b;
+    if (sw <= 0 || sh <= 0) return;
+    // กรอบกับภาพสัดส่วนไม่ตรงกัน (เช่นโหมดเต็มกรอบ) → ครอปส่วนเกินตรงกลาง ไม่ยืดภาพ
+    const boxA = w / h;
+    if (sw / sh > boxA + 0.001) {
+      const nw = sh * boxA;
+      sx += (sw - nw) / 2;
+      sw = nw;
+    } else if (sw / sh < boxA - 0.001) {
+      const nh = sw / boxA;
+      sy += (sh - nh) / 2;
+      sh = nh;
+    }
+    ctx2d.drawImage(v, sx, sy, sw, sh, x, y, w, h);
     return;
   }
   // กล้อง: ผ่านฟิลเตอร์ WebGL แล้วครอปแบบ cover ให้เต็มกรอบ
@@ -308,7 +336,8 @@ function resizeCanvas(w, h) {
   canvas.width = w;
   canvas.height = h;
   for (const l of layers) {
-    if (l.preset) applyPreset(l, l.preset);
+    if (l.kind === 'screen' && ['full', 'fill'].includes(l.preset)) applyPreset(l, autoFull(l));
+    else if (l.preset) applyPreset(l, l.preset);
     else clampLayer(l);
   }
 }
@@ -434,7 +463,8 @@ overlay.addEventListener('dblclick', (e) => {
   const l = hitTest(p.fx, p.fy);
   if (!l) return;
   select(l);
-  applyPreset(l, l.preset === 'full' ? (l.kind === 'cam' ? 'br' : 'center') : 'full');
+  const isFull = l.preset === 'full' || l.preset === 'fill';
+  applyPreset(l, isFull ? (l.kind === 'cam' ? 'br' : 'center') : autoFull(l));
 });
 
 // ---------- แผงควบคุมเลเยอร์ ----------
@@ -464,7 +494,12 @@ function renderLayerPanel() {
   document.querySelectorAll('[data-shape]').forEach((b) => b.classList.toggle('primary', b.dataset.shape === selected.shape));
 }
 
-document.querySelectorAll('[data-pos]').forEach((b) => (b.onclick = () => selected && applyPreset(selected, b.dataset.pos)));
+document.querySelectorAll('[data-pos]').forEach((b) => (b.onclick = () => {
+  if (!selected) return;
+  const pos = b.dataset.pos;
+  if (pos === 'full' || pos === 'fill') selected.userFit = pos;
+  applyPreset(selected, pos);
+}));
 document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => {
   if (!selected) return;
   selected.shape = b.dataset.shape;
@@ -486,6 +521,7 @@ function setCrop(l, crop) {
   const cy = l.y + layerH(l) / 2;
   const areaOld = l.w * layerH(l);
   l.crop = crop;
+  if (l.kind === 'screen' && ['full', 'fill'].includes(l.preset)) return applyPreset(l, autoFull(l));
   if (l.preset) return applyPreset(l, l.preset);
   // คงจุดกึ่งกลางและพื้นที่ใกล้เคียงเดิม
   l.pa = contentAspect(l);
@@ -504,13 +540,16 @@ function autoCrop(l) {
   const v = l.video;
   if (!v.videoWidth) return;
   const top = l.kind === 'screen' && l.surface === 'window' ? titleBarPx() : 0;
+  // เริ่มสแกนใต้แถบชื่อลงมาอีก 3px และปิดการเกลี่ยพิกเซล ไม่ให้สีแถบชื่อซึมมาถูกนับเป็นเนื้อหา
+  const scanTop = top ? top + 3 : 0;
   const sw = 320;
   const scale = sw / v.videoWidth;
-  const srcH = v.videoHeight - top;
+  const srcH = v.videoHeight - scanTop;
   const sh = Math.max(1, Math.round(srcH * scale));
   const c = Object.assign(document.createElement('canvas'), { width: sw, height: sh });
   const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(v, 0, top, v.videoWidth, srcH, 0, 0, sw, sh);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(v, 0, scanTop, v.videoWidth, srcH, 0, 0, sw, sh);
   const d = g.getImageData(0, 0, sw, sh).data;
   const lum = (i) => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
   const rowHas = (y) => { for (let x = 0; x < sw; x += 2) if (lum((y * sw + x) * 4) > 24) return true; return false; };
@@ -520,15 +559,26 @@ function autoCrop(l) {
   while (b > t && !rowHas(b)) b--;
   while (L < R && !colHas(L)) L++;
   while (R > L && !colHas(R)) R--;
-  if (b - t < 10 || R - L < 10) return setCrop(l, { t: top, b: 0, l: 0, r: 0 }); // ภาพมืดทั้งจอ → ตัดแค่หัวหน้าต่าง
+  if (b - t < 10 || R - L < 10) {
+    // ภาพยังมืดทั้งจอ (เฟรมแรกยังไม่มา หรือ iPhone ยังไม่ได้ต่อ) → ตัดแค่หัวหน้าต่างไว้ก่อน แล้วลองใหม่
+    setCrop(l, { t: top, b: 0, l: 0, r: 0 });
+    return false;
+  }
   const inv = 1 / scale;
   setCrop(l, {
-    t: top + Math.round(t * inv),
+    t: t === 0 ? top : scanTop + Math.round(t * inv),
     b: Math.round((sh - 1 - b) * inv),
     l: Math.round(L * inv),
     r: Math.round((sw - 1 - R) * inv),
   });
   renderLayerPanel();
+  return true;
+}
+
+// ตัดขอบอัตโนมัติตอนเริ่มแชร์: ลองซ้ำทุก 1 วินาทีจนเจอภาพจริง (สูงสุด ~1 นาที)
+function autoCropWhenReady(l, stream, tries = 0) {
+  if (l.stream !== stream || tries > 60) return;
+  if (!autoCrop(l)) setTimeout(() => autoCropWhenReady(l, stream, tries + 1), 1000);
 }
 
 $('cropTop').oninput = () => {
@@ -577,8 +627,10 @@ function addSource(kind, stream) {
   l.surface = (track.getSettings && track.getSettings().displaySurface) || '';
   l.video.onloadedmetadata = () => {
     const hasOther = layers.some((o) => o !== l && o.stream);
-    if (!restoreLayout(l)) applyPreset(l, kind === 'cam' && hasOther ? 'br' : 'full');
-    if (kind === 'screen') setTimeout(() => autoCrop(l), 700); // ตัดหัวหน้าต่าง + ขอบดำให้อัตโนมัติ
+    const restored = restoreLayout(l);
+    // ภาพจอที่เคยตั้งเต็มจอ → เลือกแบบเต็มกรอบ/พอดีจอให้ตามแนวภาพตอนนี้
+    if (!restored || (kind === 'screen' && ['full', 'fill'].includes(l.preset))) applyPreset(l, kind === 'cam' ? (hasOther ? 'br' : 'full') : autoFull(l));
+    if (kind === 'screen') setTimeout(() => autoCropWhenReady(l, stream), 500); // ตัดหัวหน้าต่าง + ขอบดำให้อัตโนมัติ
     renderLayerPanel();
   };
   if (kind === 'screen') connectScreenAudio(stream);
