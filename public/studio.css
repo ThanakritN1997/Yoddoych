@@ -92,5 +92,6 @@
 .chip { font-size: 13px; border-radius: 99px; padding: 2px 10px; border: 1px solid var(--line); }
 .chip.live { border-color: var(--ok); color: var(--ok); }
 .chip.failed, .chip.error { border-color: var(--danger); color: var(--danger); }
+.chip.connecting, .chip.reconnecting { border-color: #f5a524; color: #f5a524; }
 .advice { background: rgba(245, 165, 36, .12); border: 1px solid rgba(245, 165, 36, .5); border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 0 0 8px; }
 .log { max-height: 180px; overflow: auto; font-size: 12px; background: var(--bg); border-radius: 8px; padding: 8px; white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; }

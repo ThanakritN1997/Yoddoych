@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 // ---------- แพลตฟอร์ม ----------
 // max = บิตเรตวิดีโอสูงสุดที่แนะนำโดยประมาณ (kbps) · orient = แนวภาพที่แพลตฟอร์มนั้นเหมาะ (h แนวนอน / v แนวตั้ง)
 const PLATFORMS = {
-  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม”' },
+  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
   facebook: { name: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', max: 9000, orient: 'h', help: 'Facebook → วิดีโอสด → ซอฟต์แวร์สตรีม → คัดลอก “คีย์สตรีม”' },
   tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key · ไม่มี Stream Key? ใช้ปุ่ม “เปิดจอสำหรับ LIVE Studio” แทน' },
   instagram: { name: 'Instagram', url: '', max: 6000, orient: 'v', help: 'instagram.com บนคอม → สร้าง → วิดีโอสด → คัดลอก Stream URL และ Stream key' },
@@ -794,7 +794,9 @@ function handle(m) {
     case 'stats': {
       $('stFps').textContent = Math.round(m.fps);
       // tee muxer มักไม่รายงานบิตเรต (N/A) → แสดงค่าที่ตั้งไว้แทน
-      $('stKbps').textContent = m.kbps ? Math.round(m.kbps).toLocaleString() : '≈' + plan.videoKbps.toLocaleString();
+      // บิตเรตจริงที่ส่งออก = ผลรวมของทุกปลายทางที่ออนไลน์
+      const out = (m.dests || []).reduce((sum, d) => sum + (d.kbps || 0), 0);
+      $('stKbps').textContent = out ? Math.round(out).toLocaleString() : '–';
       $('stSpeed').textContent = m.speed.toFixed(2) + 'x';
       $('stDrop').textContent = m.drop;
       renderChips(m.dests);
@@ -823,8 +825,11 @@ function appendLog(line) {
 }
 
 function renderChips(list) {
-  const label = { connecting: 'กำลังเชื่อมต่อ', live: 'ออนไลน์', error: 'ต่อไม่ได้ · กำลังลองใหม่', failed: 'หลุด' };
-  $('destStatus').innerHTML = list.map((d) => `<span class="chip ${d.state}">${esc(d.name)} · ${label[d.state] || d.state}</span>`).join('');
+  const label = { connecting: 'กำลังเชื่อมต่อ', reconnecting: 'กำลังต่อใหม่', live: 'ออนไลน์', error: 'หลุด · กำลังต่อใหม่', failed: 'หลุด' };
+  $('destStatus').innerHTML = list.map((d) => {
+    const extra = [d.state === 'live' && d.kbps ? `${Math.round(d.kbps).toLocaleString()} kbps` : '', d.reconnects ? `ต่อใหม่ ${d.reconnects} ครั้ง` : ''].filter(Boolean).join(' · ');
+    return `<span class="chip ${d.state}">${esc(d.name)} · ${label[d.state] || d.state}${extra ? ' · ' + extra : ''}</span>`;
+  }).join('');
 }
 
 function showAdvice(text) {
@@ -885,8 +890,13 @@ async function startLive() {
     videoBitsPerSecond: Math.max(8e6, plan.videoKbps * 2500), // ส่งภายในเครื่องแบบคุณภาพสูง แล้วค่อยบีบที่ FFmpeg
     audioBitsPerSecond: 192000,
   });
-  recorder.ondataavailable = async (e) => {
-    if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(await e.data.arrayBuffer());
+  // ส่ง Blob ตรง ๆ: WebSocket รับประกันลำดับ (ถ้า await arrayBuffer() ก่อน ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)
+  recorder.ondataavailable = (e) => {
+    if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+  };
+  recorder.onerror = (e) => {
+    appendLog('MediaRecorder error: ' + ((e.error && e.error.message) || 'unknown'));
+    toast('เบราว์เซอร์หยุดบันทึกภาพ — กดเริ่มไลฟ์ใหม่');
   };
 
   ws.send(JSON.stringify({
@@ -942,6 +952,13 @@ calc();
 window.helper.then((h) => {
   H = h;
   if (!h) return showHelperMissing();
+  if (window.versionLess(h.version, window.HELPER_MIN_VERSION)) {
+    $('helperCard').hidden = false;
+    $('helperDesktop').hidden = true;
+    $('helperUpdate').hidden = false;
+    $('helperVer').textContent = h.version || 'เก่า';
+    $('helperUpdateLink').href = window.HELPER_DOWNLOAD;
+  }
   connect();
   loadEncoders();
 });

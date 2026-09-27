@@ -2,6 +2,13 @@
 // - เปิดเว็บจากเครื่องที่รันเซิร์ฟเวอร์เอง (localhost) → ใช้ที่เดียวกัน
 // - เปิดจากเว็บออนไลน์ (เช่น Vercel) → ลองต่อ Helper ที่ 127.0.0.1:47800
 window.HELPER_PORT = 47800;
+window.HELPER_MIN_VERSION = '1.1.0'; // 1.1.0: ตัวส่งต่อแยกต่อปลายทาง + ต่อใหม่อัตโนมัติ (แก้ไลฟ์หลุด)
+window.versionLess = (a, b) => {
+  const pa = String(a || '0').split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
+  return false;
+};
 window.HELPER_DOWNLOAD = 'https://github.com/ThanakritN1997/Yoddoych/releases/latest/download/YoddoyHelper-win64.zip';
 window.IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
 

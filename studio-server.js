@@ -1,4 +1,4 @@
-// สตูดิโอไลฟ์: รับวิดีโอจากเบราว์เซอร์ (WebM ผ่าน WebSocket) → FFmpeg เข้ารหัสครั้งเดียว → ส่ง RTMP/RTMPS ไปทุกแพลตฟอร์มพร้อมกัน
+// สตูดิโอไลฟ์: รับวิดีโอจากเบราว์เซอร์ (WebM ผ่าน WebSocket) → FFmpeg เข้ารหัสครั้งเดียว → ตัวส่งต่อแยกต่อปลายทาง → RTMP/RTMPS ทุกแพลตฟอร์ม
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const https = require('https');
@@ -47,12 +47,10 @@ function videoArgs(enc, kbps, fps) {
   }
 }
 
-// เครื่องหมายพิเศษของ tee muxer ต้อง escape
-const teeEscape = (s) => s.replace(/[\\|[\]]/g, (c) => '\\' + c);
-
-function buildArgs(cfg) {
+// ตัวเข้ารหัส: รับ WebM จากเบราว์เซอร์ → บีบอัดครั้งเดียว → MPEG-TS ออกทาง stdout
+// (TS ต่อกลางสตรีมได้ทุกเมื่อ ตัวส่งต่อที่เริ่มใหม่จึงเริ่มอ่านได้ทันที)
+function encoderArgs(cfg) {
   const { width, height, fps, videoKbps, audioKbps, encoder } = cfg;
-  const outputs = cfg.destinations.map((d) => `[f=flv:onfail=ignore:flvflags=no_duration_filesize]${teeEscape(d.target)}`).join('|');
   return [
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '1',
     '-thread_queue_size', '1024', '-fflags', '+genpts', '-i', 'pipe:0',
@@ -60,11 +58,23 @@ function buildArgs(cfg) {
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps}`,
     '-fps_mode', 'cfr',
     ...videoArgs(encoder, videoKbps, fps),
+    '-bsf:v', 'dump_extra=freq=keyframe', // ใส่ SPS/PPS ทุก keyframe ให้ปลายทางที่ต่อใหม่ถอดรหัสได้
     '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-ar', '48000', '-ac', '2',
-    '-f', 'tee', '-use_fifo', '1',
-    // คิวแยกต่อปลายทาง: ปลายทางไหนช้า/หลุดจะไม่ฉุดตัวอื่น และจะพยายามต่อใหม่เองทุก 3 วินาที
-    '-fifo_options', 'attempt_recovery=1:recover_any_error=1:recovery_wait_time=3:drop_pkts_on_overflow=1:queue_size=120',
-    outputs,
+    '-f', 'mpegts', '-mpegts_flags', '+resend_headers', '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1',
+    'pipe:1',
+  ];
+}
+
+// ตัวส่งต่อ 1 ตัวต่อ 1 ปลายทาง: ไม่บีบอัดซ้ำ (copy) แค่ห่อเป็น FLV แล้วส่ง RTMP
+// หลุดเมื่อไหร่ → เปิดตัวใหม่ = เชื่อมต่อใหม่พร้อม header ครบ (ไม่ใช่ต่อสายเดิมกลางคัน)
+function relayArgs(target) {
+  return [
+    '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '2',
+    // วิเคราะห์สตรีมแค่ ~3 วินาที (ค่าเริ่มต้น 5) ให้ต่อใหม่ได้เร็วขึ้น — ต้องนานกว่าระยะ keyframe (2 วินาที)
+    // เพราะตัวที่เริ่มกลางสตรีมต้องรอเจอ keyframe + SPS/PPS ก่อนจึงจะรู้รูปแบบวิดีโอ
+    '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '3000000', '-probesize', '4000000', '-f', 'mpegts', '-i', 'pipe:0',
+    '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy',
+    '-f', 'flv', '-flvflags', 'no_duration_filesize', target,
   ];
 }
 
@@ -103,35 +113,87 @@ async function speedTest() {
 }
 
 // ---------- WebSocket /studio ----------
+const RELAY_MAX_BUFFER = 8 * 1024 * 1024; // ปลายทางที่ค้างเกิน ~8MB (หลายวินาที) = เน็ตไม่พอ/ค้าง → ตัดแล้วต่อใหม่
+const RELAY_RETRY_MS = [1000, 2000, 3000, 5000, 8000]; // หน่วงก่อนต่อใหม่ (เพิ่มขึ้นถ้าหลุดติดกัน)
+const num = (line, key) => {
+  const m = line.match(new RegExp(key + '=\\s*([\\d.]+)'));
+  return m ? parseFloat(m[1]) : 0;
+};
+function eachLine(stream, fn) {
+  let buf = '';
+  stream.on('data', (chunk) => {
+    buf += chunk.toString();
+    const lines = buf.split(/\r|\n/);
+    buf = lines.pop();
+    for (const l of lines) if (l.trim()) fn(l.trim());
+  });
+}
+
 function attach() {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
 
   wss.on('connection', (ws) => {
-    let ff = null;
-    let secrets = [];
-    let dests = [];
-    const hide = (line) => secrets.reduce((s, k) => (k ? s.split(k).join('••••') : s), line);
+    let session = null;
     const send = (m) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m));
 
     function stop(reason) {
-      if (!ff) return;
-      try { ff.stdin.end(); } catch {}
-      const p = ff;
-      ff = null;
-      setTimeout(() => p.kill('SIGKILL'), 3000);
+      if (!session) return;
+      const s = session;
+      session = null;
+      s.stopped = true;
+      for (const r of s.relays) {
+        clearTimeout(r.timer);
+        if (r.proc) r.proc.kill('SIGKILL');
+      }
+      try { s.encoder.stdin.end(); } catch {}
+      setTimeout(() => s.encoder.kill('SIGKILL'), 3000);
       send({ type: 'stopped', reason });
+    }
+
+    function startRelay(s, r) {
+      if (s.stopped) return;
+      r.state = r.connects ? 'reconnecting' : 'connecting';
+      r.connects++;
+      r.bytes = 0;
+      const proc = spawn(FFMPEG, relayArgs(r.target), { windowsHide: true });
+      r.proc = proc;
+      r.startedAt = Date.now();
+      proc.stdin.on('error', () => {});
+      eachLine(proc.stderr, (raw) => {
+        const line = s.hide(raw);
+        if (line.startsWith('frame=') || line.startsWith('size=')) {
+          // มีสถิติไหลออก = ส่งถึงปลายทางแล้ว
+          r.state = 'live';
+          r.kbps = num(line, 'bitrate');
+          if (Date.now() - r.startedAt > 20000) r.fails = 0; // ต่อได้นานพอ → รีเซ็ตตัวนับการหลุด
+          return;
+        }
+        send({ type: 'log', line: `[${r.name}] ${line}` });
+      });
+      proc.on('exit', (code) => {
+        if (r.proc !== proc) return;
+        r.proc = null;
+        if (s.stopped) return;
+        r.state = 'error';
+        r.kbps = 0;
+        const wait = RELAY_RETRY_MS[Math.min(r.fails, RELAY_RETRY_MS.length - 1)];
+        r.fails++;
+        send({ type: 'log', line: `[${r.name}] การเชื่อมต่อหลุด (code ${code}) — ต่อใหม่ใน ${wait / 1000} วินาที (ครั้งที่ ${r.connects})` });
+        r.timer = setTimeout(() => startRelay(s, r), wait);
+      });
     }
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
-        if (ff && ff.stdin.writable) ff.stdin.write(data);
+        const enc = session && session.encoder;
+        if (enc && enc.stdin.writable) enc.stdin.write(data);
         return;
       }
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
 
       if (msg.type === 'start') {
-        if (ff) stop('restart');
+        if (session) stop('restart');
         const enabled = (msg.destinations || []).filter((d) => d.url);
         if (!enabled.length) return send({ type: 'error', message: 'ยังไม่ได้ใส่ปลายทางที่จะไลฟ์' });
         const bad = enabled.find((d) => !/^rtmps?:\/\/[^\s]+$/i.test(String(d.url).trim()));
@@ -144,52 +206,47 @@ function attach() {
           videoKbps: Math.min(20000, Math.max(300, msg.videoKbps | 0)),
           audioKbps: [96, 128, 160, 192].includes(msg.audioKbps) ? msg.audioKbps : 160,
           encoder: encs.includes(msg.encoder) ? msg.encoder : encs[0] || 'libx264',
-          destinations: enabled.map((d) => ({ name: d.name, target: joinUrl(d.url, d.key) })),
         };
-        secrets = enabled.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
-        // match = URL ที่ซ่อนคีย์แล้ว ใช้จับว่าข้อความ error ของ FFmpeg เป็นของปลายทางไหน
-        dests = cfg.destinations.map((d) => ({ name: d.name, state: 'connecting', match: hide(d.target), lastError: 0 }));
-        const publicDests = () => dests.map(({ name, state }) => ({ name, state }));
+        const secrets = enabled.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
+        const s = {
+          stopped: false,
+          hide: (line) => secrets.reduce((acc, k) => acc.split(k).join('••••'), line),
+          relays: enabled.map((d) => ({ name: d.name, target: joinUrl(d.url, d.key), state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null })),
+        };
+        const publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1) }));
 
-        const proc = spawn(FFMPEG, buildArgs(cfg), { windowsHide: true });
-        ff = proc;
-        proc.stdin.on('error', () => {});
-        const started = Date.now();
-        const num = (line, key) => {
-          const m = line.match(new RegExp(key + '=\\s*([\\d.]+)'));
-          return m ? parseFloat(m[1]) : 0;
-        };
-        let buf = '';
-        proc.stderr.on('data', (chunk) => {
-          buf += chunk.toString();
-          const lines = buf.split(/\r|\n/);
-          buf = lines.pop();
-          for (const raw of lines) {
-            const line = hide(raw.trim());
-            if (!line) continue;
-            if (line.startsWith('frame=')) {
-              const now = Date.now();
-              for (const d of dests) {
-                // FIFO ลองต่อใหม่ทุก 3 วินาที → ถ้าไม่มี error ของปลายทางนี้เกิน 8 วินาที ถือว่าออนไลน์
-                if (d.state === 'failed') continue;
-                if (now - d.lastError < 8000) d.state = 'error';
-                else if (now - started > 5000) d.state = 'live';
-              }
-              send({ type: 'stats', fps: num(line, 'fps'), kbps: num(line, 'bitrate'), dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed'), dests: publicDests() });
+        s.encoder = spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true });
+        session = s;
+        s.encoder.stdin.on('error', () => {});
+
+        // แจกข้อมูลที่บีบอัดแล้วให้ทุกปลายทาง — ปลายทางที่ค้างจะไม่ฉุดตัวอื่น
+        s.encoder.stdout.on('data', (chunk) => {
+          for (const r of s.relays) {
+            if (!r.proc || !r.proc.stdin.writable) continue;
+            if (r.proc.stdin.writableLength > RELAY_MAX_BUFFER) {
+              send({ type: 'log', line: `[${r.name}] ส่งไม่ทัน (อัปโหลดไม่พอหรือปลายทางค้าง) — ตัดแล้วต่อใหม่` });
+              r.proc.kill('SIGKILL');
               continue;
             }
-            const slave = line.match(/Slave muxer #(\d+) failed/);
-            if (slave && dests[+slave[1]]) dests[+slave[1]].state = 'failed';
-            if (/error|failed/i.test(line)) dests.forEach((d) => line.includes(d.match) && (d.lastError = Date.now()));
-            send({ type: 'log', line });
+            r.proc.stdin.write(chunk);
           }
         });
-        proc.on('exit', (code) => {
-          if (ff !== proc) return;
-          ff = null;
-          send({ type: 'stopped', reason: code === 0 ? 'จบการไลฟ์' : `FFmpeg หยุดทำงาน (code ${code})` });
+
+        eachLine(s.encoder.stderr, (raw) => {
+          const line = s.hide(raw);
+          if (line.startsWith('frame=')) {
+            send({ type: 'stats', fps: num(line, 'fps'), kbps: 0, dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed'), dests: publicDests() });
+            return;
+          }
+          send({ type: 'log', line: `[encoder] ${line}` });
         });
-        proc.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
+        s.encoder.on('exit', (code) => {
+          if (session !== s) return;
+          stop(code === 0 ? 'จบการไลฟ์' : `ตัวเข้ารหัสหยุดทำงาน (code ${code}) — กดเริ่มไลฟ์ใหม่`);
+        });
+        s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
+
+        s.relays.forEach((r) => startRelay(s, r));
         send({ type: 'started', encoder: cfg.encoder, dests: publicDests() });
       }
 
@@ -218,4 +275,4 @@ async function handleApi(req, res) {
   return false;
 }
 
-module.exports = { attach, handleApi, detectEncoders };
+module.exports = { attach, handleApi, detectEncoders, _test: { encoderArgs, relayArgs, FFMPEG } };
