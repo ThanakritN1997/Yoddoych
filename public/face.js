@@ -75,6 +75,226 @@ class FaceTracker {
   }
 }
 
+// ---------- แยกคนออกจากพื้นหลัง (MediaPipe Selfie Segmenter) ----------
+const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+class BgSegmenter {
+  constructor() {
+    this.state = 'off';
+    this.small = document.createElement('canvas'); // ย่อภาพก่อนส่งเข้า AI → เร็วและพอสำหรับขอบนุ่ม
+    this.sctx = this.small.getContext('2d', { willReadFrequently: false });
+    this.mask = null; // { data: Uint8Array, w, h }
+    this.lastTime = -1;
+  }
+  async load() {
+    if (this.state !== 'off' && this.state !== 'error') return this.ready;
+    this.state = 'loading';
+    this.ready = (async () => {
+      const vision = await import(`${MP_BASE}/vision_bundle.mjs`);
+      const files = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+      const make = (delegate) => vision.ImageSegmenter.createFromOptions(files, {
+        baseOptions: { modelAssetPath: SEG_MODEL, delegate },
+        runningMode: 'VIDEO',
+        outputCategoryMask: false,
+        outputConfidenceMasks: true,
+      });
+      try {
+        this.seg = await make('GPU');
+      } catch {
+        this.seg = await make('CPU');
+      }
+      this.state = 'ready';
+    })().catch((e) => {
+      this.state = 'error';
+      throw e;
+    });
+    return this.ready;
+  }
+  update(video) {
+    if (this.state !== 'ready' || !video.videoWidth) return this.mask;
+    if (video.currentTime === this.lastTime) return this.mask;
+    this.lastTime = video.currentTime;
+    const w = 320;
+    const h = Math.max(2, Math.round((w * video.videoHeight) / video.videoWidth / 2) * 2);
+    if (this.small.width !== w || this.small.height !== h) {
+      this.small.width = w;
+      this.small.height = h;
+      this.acc = new Float32Array(w * h);
+      this.mask = { data: new Uint8Array(w * h), w, h };
+    }
+    this.sctx.drawImage(video, 0, 0, w, h);
+    try {
+      this.seg.segmentForVideo(this.small, performance.now(), (res) => {
+        const masks = res.confidenceMasks;
+        if (!masks || !masks.length) return;
+        const conf = masks[masks.length - 1].getAsFloat32Array(); // ช่องสุดท้าย = ความมั่นใจว่าเป็น "คน"
+        const acc = this.acc;
+        const out = this.mask.data;
+        for (let i = 0; i < conf.length; i++) {
+          acc[i] = acc[i] * 0.45 + conf[i] * 0.55; // ลดขอบกะพริบระหว่างเฟรม
+          out[i] = acc[i] * 255;
+        }
+      });
+    } catch {}
+    return this.mask;
+  }
+}
+
+// ---------- รูปพื้นหลังสำเร็จรูป (วาดเองด้วย canvas) ----------
+function seeded(seed) {
+  let s = seed;
+  return () => ((s = (s * 16807) % 2147483647) / 2147483647);
+}
+const BG_PRESETS = {
+  neonroom: { name: 'ห้องนีออน', draw(g, W, H, R) {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#140a2e'); gr.addColorStop(1, '#2a0f3d'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#1b1238'; g.fillRect(0, H * .72, W, H * .28);
+    for (const [x, c] of [[.12, '#ff4fd8'], [.88, '#39d5ff']]) { g.shadowColor = c; g.shadowBlur = 40; g.strokeStyle = c; g.lineWidth = 10; g.beginPath(); g.moveTo(W * x, H * .08); g.lineTo(W * x, H * .7); g.stroke(); }
+    g.shadowBlur = 30; g.shadowColor = '#ff4fd8'; g.strokeStyle = '#ffb3f1'; g.lineWidth = 6; g.strokeRect(W * .3, H * .15, W * .4, H * .28);
+    g.shadowBlur = 0; g.fillStyle = '#261a4d'; for (let i = 0; i < 4; i++) g.fillRect(W * (.22 + i * .15), H * .5, W * .1, H * .22);
+    g.fillStyle = 'rgba(57,213,255,.25)'; g.fillRect(0, H * .72, W, 4);
+  } },
+  sunset: { name: 'พระอาทิตย์ตก', draw(g, W, H) {
+    const gr = g.createLinearGradient(0, 0, 0, H * .65); gr.addColorStop(0, '#2b1a55'); gr.addColorStop(.55, '#e8617a'); gr.addColorStop(1, '#ffc27a'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    const sg = g.createRadialGradient(W * .5, H * .62, 10, W * .5, H * .62, H * .3); sg.addColorStop(0, '#fff3c4'); sg.addColorStop(.3, '#ffd27a'); sg.addColorStop(1, 'rgba(255,190,120,0)'); g.fillStyle = sg; g.fillRect(0, 0, W, H);
+    const sea = g.createLinearGradient(0, H * .65, 0, H); sea.addColorStop(0, '#6b3a73'); sea.addColorStop(1, '#1d1636'); g.fillStyle = sea; g.fillRect(0, H * .65, W, H * .35);
+    g.fillStyle = 'rgba(255,220,160,.5)'; for (let i = 0; i < 9; i++) g.fillRect(W * (.44 + Math.sin(i) * .04), H * (.68 + i * .03), W * (.12 - i * .01), 3);
+  } },
+  city: { name: 'เมืองกลางคืน', draw(g, W, H, R) {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#050a1f'); gr.addColorStop(1, '#16224a'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 60; i++) { const x = R() * W, y = H * (.2 + R() * .5), r = 8 + R() * 38; const c = ['255,196,110', '255,120,160', '120,190,255'][i % 3]; const bg = g.createRadialGradient(x, y, 0, x, y, r); bg.addColorStop(0, `rgba(${c},.55)`); bg.addColorStop(1, `rgba(${c},0)`); g.fillStyle = bg; g.fillRect(x - r, y - r, r * 2, r * 2); }
+    g.fillStyle = '#0a0f26'; let x = 0; while (x < W) { const bw = 40 + R() * 90, bh = H * (.25 + R() * .35); g.fillRect(x, H - bh, bw, bh); g.fillStyle = 'rgba(255,214,140,.7)'; for (let yy = H - bh + 12; yy < H - 10; yy += 18) for (let xx = x + 8; xx < x + bw - 8; xx += 14) if (R() > .55) g.fillRect(xx, yy, 5, 8); g.fillStyle = '#0a0f26'; x += bw + 4; }
+  } },
+  studio: { name: 'สตูดิโอ', draw(g, W, H) {
+    const gr = g.createRadialGradient(W * .5, H * .45, H * .1, W * .5, H * .5, W * .7); gr.addColorStop(0, '#e9e4dc'); gr.addColorStop(1, '#8f877d'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  } },
+  pastel: { name: 'พาสเทล', draw(g, W, H) {
+    g.fillStyle = '#fbe7f3'; g.fillRect(0, 0, W, H);
+    for (const [x, y, r, c] of [[.2, .3, .45, '#ffc6e0'], [.8, .25, .4, '#c9d7ff'], [.6, .85, .5, '#d8f5e8'], [.1, .9, .35, '#fff0c2']]) { const b = g.createRadialGradient(W * x, H * y, 0, W * x, H * y, W * r); b.addColorStop(0, c); b.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = b; g.fillRect(0, 0, W, H); }
+  } },
+  gaming: { name: 'เกมมิ่ง', draw(g, W, H) {
+    const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#0b0620'); gr.addColorStop(1, '#1a0b3a'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(160,90,255,.45)'; g.lineWidth = 2; const hz = H * .55;
+    for (let i = -20; i <= 20; i++) { g.beginPath(); g.moveTo(W / 2 + i * 12, hz); g.lineTo(W / 2 + i * W * .12, H); g.stroke(); }
+    for (let k = 0; k < 12; k++) { const y = hz + (H - hz) * Math.pow(k / 12, 1.8); g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+    const sg = g.createLinearGradient(0, hz - 4, 0, hz + 4); sg.addColorStop(0, 'rgba(0,229,255,0)'); sg.addColorStop(.5, '#00e5ff'); sg.addColorStop(1, 'rgba(0,229,255,0)'); g.fillStyle = sg; g.fillRect(0, hz - 4, W, 8);
+    const sun = g.createLinearGradient(0, H * .15, 0, hz); sun.addColorStop(0, '#ff3ea5'); sun.addColorStop(1, '#ffb13e'); g.fillStyle = sun; g.beginPath(); g.arc(W / 2, hz, H * .28, Math.PI, 0); g.fill();
+  } },
+  forest: { name: 'ป่าแสงเช้า', draw(g, W, H, R) {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#cfe8c8'); gr.addColorStop(1, '#2f5d3a'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 14; i++) { const x = R() * W, w = 20 + R() * 50; g.fillStyle = `rgba(30,60,35,${.35 + R() * .4})`; g.fillRect(x, 0, w, H); }
+    g.globalCompositeOperation = 'lighter'; for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(255,248,210,.08)'; g.beginPath(); g.moveTo(W * (.1 + i * .12), 0); g.lineTo(W * (.2 + i * .12), 0); g.lineTo(W * (.45 + i * .1), H); g.lineTo(W * (.3 + i * .1), H); g.fill(); } g.globalCompositeOperation = 'source-over';
+  } },
+  snow: { name: 'หิมะ', draw(g, W, H, R) {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#9fb8d6'); gr.addColorStop(1, '#eef4fb'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#5f7a99'; for (let i = 0; i < 9; i++) { const x = (i / 8) * W, h = H * (.3 + R() * .2); g.beginPath(); g.moveTo(x - 90, H * .75); g.lineTo(x, H * .75 - h); g.lineTo(x + 90, H * .75); g.fill(); }
+    g.fillStyle = '#f7fbff'; g.fillRect(0, H * .75, W, H * .25);
+    for (let i = 0; i < 220; i++) { g.fillStyle = `rgba(255,255,255,${.5 + R() * .5})`; g.beginPath(); g.arc(R() * W, R() * H, 1 + R() * 3, 0, 7); g.fill(); }
+  } },
+  cozy: { name: 'ห้องอบอุ่น', draw(g, W, H) {
+    g.fillStyle = '#e9dccb'; g.fillRect(0, 0, W, H);
+    const lg = g.createLinearGradient(W * .55, 0, W * .95, H); lg.addColorStop(0, 'rgba(255,236,190,.85)'); lg.addColorStop(1, 'rgba(255,236,190,0)'); g.fillStyle = lg;
+    for (let i = 0; i < 3; i++) g.fillRect(W * (.58 + i * .12), H * .1, W * .1, H * .5);
+    g.fillStyle = '#b89a7a'; g.fillRect(0, H * .78, W, H * .22);
+    g.fillStyle = '#7a5b43'; g.fillRect(W * .06, H * .45, W * .22, H * .33); g.fillStyle = '#3e6b4a'; g.beginPath(); g.ellipse(W * .17, H * .38, W * .07, H * .1, 0, 0, 7); g.fill();
+  } },
+};
+const bgPresetCanvas = {};
+function bgPresetImage(id) {
+  if (!bgPresetCanvas[id]) {
+    const c = Object.assign(document.createElement('canvas'), { width: 1280, height: 720 });
+    BG_PRESETS[id].draw(c.getContext('2d'), c.width, c.height, seeded(Object.keys(BG_PRESETS).indexOf(id) * 7919 + 17));
+    bgPresetCanvas[id] = c;
+  }
+  return bgPresetCanvas[id];
+}
+
+// ---------- กรอบกล้อง ----------
+const FRAMES = {
+  none: 'ไม่มี', glow: 'ไล่สีเรืองแสง', neon: 'นีออนชมพู', white: 'ขาว', gold: 'ทอง', hud: 'เกมมิ่ง HUD',
+  rgb: 'RGB วิ่ง', cyber: 'ไซเบอร์', pastel: 'พาสเทลวิบวับ', fire: 'ไฟ', lime: 'เขียวนีออน',
+};
+// path(ctx) = วาดรูปทรงกรอบ (ตามรูปทรงกล้อง) · t = เวลา (วินาที) สำหรับกรอบที่เคลื่อนไหว
+function drawFrame(ctx, id, x, y, w, h, path, t) {
+  if (!id || id === 'none') return;
+  const lw = Math.max(3, Math.min(w, h) * 0.014);
+  const stroke = (style, width, blur, color) => {
+    ctx.save();
+    path(ctx);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = style;
+    if (blur) { ctx.shadowBlur = blur; ctx.shadowColor = color; }
+    ctx.stroke();
+    ctx.restore();
+  };
+  const corners = (len, width, color, blur) => {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+    if (blur) { ctx.shadowBlur = blur; ctx.shadowColor = color; }
+    const L = len;
+    for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]]) {
+      ctx.beginPath(); ctx.moveTo(cx, cy + dy * L); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * L, cy); ctx.stroke();
+    }
+    ctx.restore();
+  };
+  const star = (cx, cy, r, color) => {
+    ctx.save(); ctx.fillStyle = color; ctx.shadowBlur = r * 2; ctx.shadowColor = color; ctx.beginPath();
+    for (let i = 0; i < 8; i++) { const a = (i * Math.PI) / 4; const rr = i % 2 ? r * 0.3 : r; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    ctx.fill(); ctx.restore();
+  };
+  const lin = (stops, x0 = x, y0 = y + h, x1 = x + w, y1 = y) => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+    return g;
+  };
+  const m = Math.min(w, h);
+  switch (id) {
+    case 'glow': stroke(lin(['#7dd3fc', '#e9d5ff', '#fda4af']), lw, lw * 5, 'rgba(244,114,182,.85)'); break;
+    case 'neon': stroke('#ff4d8d', lw, lw * 6, '#ff4d8d'); break;
+    case 'white': stroke('#fff', lw, lw * 2, 'rgba(0,0,0,.35)'); break;
+    case 'gold':
+      stroke(lin(['#8a5a00', '#ffe27a', '#b87900', '#fff1b0']), lw * 0.6, 0);
+      corners(m * 0.12, lw * 1.6, '#f5c542', lw * 2);
+      break;
+    case 'hud':
+      stroke('rgba(0,229,255,.35)', lw * 0.4, 0);
+      corners(m * 0.1, lw * 1.2, '#00e5ff', lw * 3);
+      ctx.save(); ctx.fillStyle = '#00e5ff';
+      for (let i = 1; i < 10; i++) ctx.fillRect(x + (w * i) / 10 - lw * 0.2, y + h - lw * 2.2, lw * 0.4, lw * 1.4);
+      ctx.restore();
+      break;
+    case 'rgb': {
+      const g = ctx.createConicGradient ? ctx.createConicGradient(t * 1.5, x + w / 2, y + h / 2) : null;
+      if (g) { ['#ff004c', '#ffb300', '#3dff6e', '#00c8ff', '#b300ff', '#ff004c'].forEach((c, i, a) => g.addColorStop(i / (a.length - 1), c)); stroke(g, lw * 1.1, lw * 4, 'rgba(180,120,255,.8)'); } else stroke('#b300ff', lw, lw * 4, '#b300ff');
+      break;
+    }
+    case 'cyber': {
+      stroke('#ff2fb2', lw * 0.9, lw * 4, '#ff2fb2');
+      // เส้นในสีฟ้า: ย่อรูปทรงเดิมเข้ามา (path ถูกเก็บตามพิกัดที่แปลงแล้ว ตอน stroke จึงได้เส้นหนาปกติ)
+      const cx = x + w / 2, cy = y + h / 2;
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(1 - (lw * 4.4) / w, 1 - (lw * 4.4) / h); ctx.translate(-cx, -cy);
+      path(ctx);
+      ctx.restore();
+      ctx.save(); ctx.strokeStyle = '#2fe3ff'; ctx.lineWidth = lw * 0.5; ctx.shadowBlur = lw * 3; ctx.shadowColor = '#2fe3ff';
+      ctx.stroke(); ctx.restore();
+      break;
+    }
+    case 'pastel':
+      stroke(lin(['#c4b5fd', '#f9a8d4', '#a5b4fc']), lw, lw * 3, 'rgba(196,181,253,.8)');
+      for (const [sx, sy, k] of [[x + lw * 3, y + lw * 3, 1], [x + w - lw * 3, y + lw * 3, .7], [x + lw * 3, y + h - lw * 3, .7], [x + w - lw * 3, y + h - lw * 3, 1]]) star(sx, sy, lw * 2.4 * (0.85 + 0.15 * Math.sin(t * 3 + sx)) * k, '#fff');
+      break;
+    case 'fire': {
+      const flick = 0.8 + 0.2 * Math.sin(t * 9) * Math.sin(t * 5.3);
+      stroke(lin(['#ff3d00', '#ffb300', '#ff6a00'], x, y + h, x, y), lw * 1.1, lw * 6 * flick, 'rgba(255,110,0,.9)');
+      break;
+    }
+    case 'lime':
+      stroke('rgba(163,230,53,.5)', lw * 0.5, 0);
+      corners(m * 0.16, lw * 1.4, '#a3e635', lw * 4);
+      break;
+  }
+}
+
 // ---------- รายการปรับบิวตี้ (แบบแผงของ TikTok LIVE Studio) ----------
 // min < 0 = ปรับได้สองทาง (เช่น คางสั้น ↔ ยาว) · face: true = ต้องจับใบหน้า
 const BEAUTY_GROUPS = [

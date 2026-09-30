@@ -342,6 +342,7 @@ function drawLayerContent(l) {
   const face = faceWanted() ? faceTracker.update(v) : null;
   fx.params.foundation = (faceCfg.foundation || 0) / 100; // รองพื้นใช้ได้แม้ยังไม่เจอใบหน้า
   fx.setFace(!compare && face ? buildFaceFx(face, v, faceCfg) : null);
+  fx.setBackground(!compare ? backgroundFor(v) : null);
   const src = (compare ? null : fx.process(v)) || v;
   const sw = src.width || v.videoWidth;
   const sh = src.height || v.videoHeight;
@@ -360,33 +361,14 @@ function drawLayerContent(l) {
   ctx2d.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, x, y, w, h);
   ctx2d.restore();
 
-  // กรอบกล้อง
+  // กรอบกล้อง (ตามรูปทรงกล้อง) · ดู FRAMES ใน face.js
   if (l.frame && l.frame !== 'none') {
-    const lw = Math.max(3, Math.min(w, h) * 0.014);
-    ctx2d.save();
-    ctx2d.beginPath();
-    if (l.shape === 'circle') ctx2d.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    else ctx2d.roundRect(x, y, w, h, l.shape === 'round' ? Math.min(w, h) * 0.06 : 0);
-    ctx2d.lineWidth = lw;
-    if (l.frame === 'glow') {
-      const g = ctx2d.createLinearGradient(x, y + h, x + w, y);
-      g.addColorStop(0, '#7dd3fc');
-      g.addColorStop(0.5, '#e9d5ff');
-      g.addColorStop(1, '#fda4af');
-      ctx2d.strokeStyle = g;
-      ctx2d.shadowColor = 'rgba(244, 114, 182, .85)';
-      ctx2d.shadowBlur = lw * 5;
-    } else if (l.frame === 'neon') {
-      ctx2d.strokeStyle = '#ff4d8d';
-      ctx2d.shadowColor = '#ff4d8d';
-      ctx2d.shadowBlur = lw * 6;
-    } else {
-      ctx2d.strokeStyle = '#fff';
-      ctx2d.shadowColor = 'rgba(0,0,0,.35)';
-      ctx2d.shadowBlur = lw * 2;
-    }
-    ctx2d.stroke();
-    ctx2d.restore();
+    const path = (g) => {
+      g.beginPath();
+      if (l.shape === 'circle') g.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      else g.roundRect(x, y, w, h, l.shape === 'round' ? Math.min(w, h) * 0.06 : 0);
+    };
+    drawFrame(ctx2d, l.frame, x, y, w, h, path, performance.now() / 1000);
   }
 
   // สติกเกอร์: วาดนอกกรอบตัด (หูกระต่าย/เขาโผล่พ้นกรอบกล้องได้)
@@ -785,6 +767,10 @@ function addSource(kind, stream) {
     // ภาพจอที่เคยตั้งเต็มจอ → เลือกแบบเต็มกรอบ/พอดีจอให้ตามแนวภาพตอนนี้
     if (!restored || (kind === 'screen' && ['full', 'fill'].includes(l.preset))) applyPreset(l, kind === 'cam' ? (hasOther ? 'br' : 'full') : autoFull(l));
     if (kind === 'screen') setTimeout(() => autoCropWhenReady(l, stream), 500); // ตัดหัวหน้าต่าง + ขอบดำให้อัตโนมัติ
+    if (kind === 'cam') {
+      if (!l.frame || l.frame === 'none') l.frame = store.get('camFrame', 'none');
+      renderFrames();
+    }
     renderLayerPanel();
   };
   if (kind === 'screen') connectScreenAudio(stream);
@@ -956,7 +942,8 @@ $('imgUrlAdd').onclick = async () => {
 
 // โหลดรูปที่เคยใส่ไว้กลับมา
 idb('all').then(async (items) => {
-  for (const it of (items || []).sort((a, b) => a.order - b.order)) if (it.blob) await addImageLayer(it.blob, it.name, it);
+  // ข้ามรูปพื้นหลังกำหนดเอง (kind: 'bg') ที่เก็บในที่เดียวกัน
+  for (const it of (items || []).filter((x) => x.uid && x.kind !== 'bg').sort((a, b) => a.order - b.order)) if (it.blob) await addImageLayer(it.blob, it.name, it);
 });
 
 // ---------- แปะ URL (เหมือน Browser Source ของ OBS) ----------
@@ -1274,6 +1261,152 @@ renderBeauty();
 renderStickers();
 ensureFace();
 setInterval(() => faceTracker.state === 'ready' && renderFaceStatus(), 1000);
+
+// ---------- พื้นหลัง: ต้นฉบับ / ตัดภาพ / เบลอ / รูป ----------
+const bgSeg = new BgSegmenter();
+const bgCfg = Object.assign({ mode: 'off', blur: 60, image: 'neonroom' }, store.get('bg', {}));
+const bgBlurCanvas = document.createElement('canvas');
+const bgBlurCtx = bgBlurCanvas.getContext('2d');
+let bgCustomImg = null;
+
+// เรียกทุกเฟรมจาก drawLayerContent ของกล้อง
+function backgroundFor(v) {
+  if (bgCfg.mode === 'off' || bgSeg.state !== 'ready') return null;
+  const mask = bgSeg.update(v);
+  if (!mask) return null;
+  if (bgCfg.mode === 'blur') {
+    // ย่อภาพให้เล็ก (ยิ่งเบลอมากยิ่งเล็ก) + เบลอ แล้วให้การ์ดจอขยายกลับ = เบลอเนียนและเบา
+    const bw = Math.round(200 - bgCfg.blur * 1.5);
+    const bh = Math.max(2, Math.round((bw * v.videoHeight) / v.videoWidth));
+    if (bgBlurCanvas.width !== bw || bgBlurCanvas.height !== bh) Object.assign(bgBlurCanvas, { width: bw, height: bh });
+    bgBlurCtx.filter = `blur(${1 + bgCfg.blur / 30}px)`;
+    bgBlurCtx.drawImage(v, 0, 0, bw, bh);
+    return { mode: 'blur', mask, source: bgBlurCanvas, static: false };
+  }
+  if (bgCfg.mode === 'image') {
+    const src = bgCfg.image === 'custom' ? bgCustomImg : bgPresetImage(bgCfg.image);
+    if (!src) return null;
+    return { mode: 'image', mask, source: src, static: true };
+  }
+  return { mode: 'remove', mask };
+}
+
+function setBg(patch) {
+  Object.assign(bgCfg, patch);
+  store.set('bg', { mode: bgCfg.mode, blur: bgCfg.blur, image: bgCfg.image });
+  if (bgCfg.mode !== 'off' && (bgSeg.state === 'off' || bgSeg.state === 'error')) {
+    bgSeg.load().catch(() => {}).finally(renderBg);
+  }
+  renderBg();
+}
+
+function renderBg() {
+  const grid = $('bgGrid');
+  grid.innerHTML = '';
+  const tile = (active, html, onclick, thumb) => {
+    const b = document.createElement('button');
+    b.className = 'bg-tile' + (active ? ' active' : '') + (thumb ? ' thumb' : '');
+    if (thumb) b.style.backgroundImage = `url(${thumb})`;
+    b.innerHTML = html;
+    b.onclick = onclick;
+    grid.append(b);
+  };
+  tile(bgCfg.mode === 'off', '<span>⊘</span>ต้นฉบับ', () => setBg({ mode: 'off' }));
+  tile(bgCfg.mode === 'remove', '<span>👤</span>ตัดภาพ', () => setBg({ mode: 'remove' }));
+  tile(bgCfg.mode === 'blur', '<span>💧</span>เบลอ', () => setBg({ mode: 'blur' }));
+  tile(bgCfg.mode === 'image' && bgCfg.image === 'custom', bgCustomImg ? '<em>รูปของฉัน</em>' : '<span>＋</span>กำหนดเอง', () => (bgCustomImg ? setBg({ mode: 'image', image: 'custom' }) : $('bgFile').click()), bgCustomImg && bgCustomImg.src);
+  for (const [id, p] of Object.entries(BG_PRESETS)) {
+    tile(bgCfg.mode === 'image' && bgCfg.image === id, `<em>${esc(p.name)}</em>`, () => setBg({ mode: 'image', image: id }), bgThumb(id));
+  }
+  $('bgBlurRow').hidden = bgCfg.mode !== 'blur';
+  $('bgBlur').value = bgCfg.blur;
+  $('bgBlurVal').textContent = bgCfg.blur;
+  $('bgChange').hidden = !bgCustomImg;
+  const st = { off: '', loading: '⏳ กำลังโหลดระบบแยกพื้นหลัง…', ready: getLayer('cam')?.stream ? '✅ แยกพื้นหลังอยู่' : 'เปิดกล้องในแท็บ “ฉาก” ก่อน', error: '⚠️ โหลดระบบแยกพื้นหลังไม่ได้ — เช็กอินเทอร์เน็ตแล้วลองใหม่' }[bgSeg.state];
+  $('bgStatus').textContent = bgCfg.mode === 'off' ? '' : st;
+}
+const bgThumbs = {};
+function bgThumb(id) {
+  if (!bgThumbs[id]) {
+    const c = Object.assign(document.createElement('canvas'), { width: 160, height: 90 });
+    c.getContext('2d').drawImage(bgPresetImage(id), 0, 0, 160, 90);
+    bgThumbs[id] = c.toDataURL('image/jpeg', 0.8);
+  }
+  return bgThumbs[id];
+}
+$('bgBlur').oninput = () => {
+  bgCfg.blur = +$('bgBlur').value;
+  $('bgBlurVal').textContent = bgCfg.blur;
+  store.set('bg', { mode: bgCfg.mode, blur: bgCfg.blur, image: bgCfg.image });
+};
+$('bgChange').onclick = () => $('bgFile').click();
+$('bgFile').onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const blob = await normalizeImage(f);
+  await loadCustomBg(blob);
+  idb('put', 'bg-custom', { kind: 'bg', blob });
+  setBg({ mode: 'image', image: 'custom' });
+};
+async function loadCustomBg(blob) {
+  const img = new Image();
+  img.src = URL.createObjectURL(blob);
+  await img.decode();
+  if (bgCustomImg) URL.revokeObjectURL(bgCustomImg.src);
+  bgCustomImg = img;
+}
+idb('get', 'bg-custom').then(async (it) => {
+  if (it && it.blob) await loadCustomBg(it.blob).catch(() => {});
+  renderBg();
+});
+setBg({});
+setInterval(() => bgCfg.mode !== 'off' && renderBgStatus(), 1500);
+function renderBgStatus() {
+  if (bgSeg.state === 'ready') $('bgStatus').textContent = getLayer('cam')?.stream ? '✅ แยกพื้นหลังอยู่' : 'เปิดกล้องในแท็บ “ฉาก” ก่อน';
+}
+
+// ---------- กรอบกล้อง (แบบ "ลักษณะที่แสดง") ----------
+function renderFrames() {
+  const cam = getLayer('cam');
+  const cur = (cam && cam.frame) || store.get('camFrame', 'none');
+  const grid = $('frameGrid');
+  grid.innerHTML = '';
+  for (const [id, name] of Object.entries(FRAMES)) {
+    const b = document.createElement('button');
+    b.className = 'frame-tile' + (cur === id ? ' active' : '');
+    b.title = name;
+    const c = Object.assign(document.createElement('canvas'), { width: 160, height: 90 });
+    const g = c.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 160, 90);
+    gr.addColorStop(0, '#1c2130');
+    gr.addColorStop(1, '#0c0f16');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 160, 90);
+    if (id === 'none') {
+      g.strokeStyle = '#6b7385'; g.lineWidth = 3;
+      g.beginPath(); g.arc(80, 45, 16, 0, 7); g.moveTo(69, 34); g.lineTo(91, 56); g.stroke();
+    } else {
+      drawFrame(g, id, 12, 10, 136, 70, (q) => { q.beginPath(); q.roundRect(12, 10, 136, 70, 6); }, 1);
+    }
+    b.append(c);
+    const label = document.createElement('span');
+    label.textContent = name;
+    b.append(label);
+    b.onclick = () => {
+      store.set('camFrame', id);
+      const l = getLayer('cam');
+      if (l) {
+        l.frame = id;
+        saveLayout();
+        if (selected === l) renderLayerPanel();
+      }
+      renderFrames();
+    };
+    grid.append(b);
+  }
+}
+renderFrames();
 
 // ---------- แท็บแผงตั้งค่า ----------
 function showTab(name) {

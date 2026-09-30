@@ -211,13 +211,6 @@
                 <button class="btn small" data-shape="round">มุมมน</button>
                 <button class="btn small" data-shape="circle">วงกลม</button>
               </div>
-              <div class="sub-title" style="margin-top:8px">กรอบกล้อง</div>
-              <div class="seg">
-                <button class="btn small" data-frame="none">ไม่มี</button>
-                <button class="btn small" data-frame="glow">ไล่สีเรืองแสง</button>
-                <button class="btn small" data-frame="white">ขาว</button>
-                <button class="btn small" data-frame="neon">นีออนชมพู</button>
-              </div>
             </div>
           </div>
 
@@ -250,6 +243,26 @@
           </div>
         </section>
 
+        <section class="card">
+          <h2>พื้นหลัง <span class="tag">AI</span></h2>
+          <div id="bgGrid" class="bg-grid"></div>
+          <div id="bgBlurRow" class="beauty-slider" hidden>
+            <span class="beauty-name">ความเบลอ</span>
+            <input id="bgBlur" type="range" min="0" max="100" value="60">
+            <span id="bgBlurVal" class="beauty-val">60</span>
+          </div>
+          <div class="row">
+            <button id="bgChange" class="btn small" hidden>เปลี่ยนรูปของฉัน</button>
+          </div>
+          <input id="bgFile" type="file" accept="image/*" hidden>
+          <p id="bgStatus" class="muted small face-status"></p>
+          <p class="muted small">“ตัดภาพ” = ลบฉากหลังออก เหลือแต่ตัว ซ้อนบนจอเกม/จอ iPhone ได้ · ครั้งแรกจะโหลดระบบแยกพื้นหลัง (~1 MB)</p>
+        </section>
+
+        <section class="card">
+          <h2>กรอบกล้อง</h2>
+          <div id="frameGrid" class="frame-grid"></div>
+        </section>
         <section class="card beauty">
           <div class="beauty-head">
             <h2>บิวตี้ <span class="tag">AI</span></h2>

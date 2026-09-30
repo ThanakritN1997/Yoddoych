@@ -81,13 +81,16 @@ class CameraFX {
     this.gl = gl;
     if (!gl) return;
 
-    const vs = `attribute vec2 p; varying vec2 uv; uniform float mirror;
-      void main(){ uv = vec2(mirror > 0.5 ? 1.0 - (p.x*0.5+0.5) : p.x*0.5+0.5, 0.5 - p.y*0.5); gl_Position = vec4(p,0.,1.); }`;
+    // uv = พิกัดในภาพกล้อง (กลับด้านกระจกแล้ว) · suv = พิกัดบนจอ (ไม่กลับด้าน ใช้กับรูปพื้นหลัง)
+    const vs = `attribute vec2 p; varying vec2 uv; varying vec2 suv; uniform float mirror;
+      void main(){ suv = vec2(p.x*0.5+0.5, 0.5 - p.y*0.5); uv = vec2(mirror > 0.5 ? 1.0 - suv.x : suv.x, suv.y); gl_Position = vec4(p,0.,1.); }`;
     // MAXW = จำนวนจุดดัดรูปหน้าสูงสุด · MAXR = บริเวณรีทัชเฉพาะจุด (ใต้ตา ร่องแก้ม คอนทัวร์ ไฮไลต์)
     const fs = `precision mediump float;
       #define MAXW 28
       #define MAXR 8
-      varying vec2 uv; uniform sampler2D tex; uniform vec2 px;
+      varying vec2 uv; varying vec2 suv; uniform sampler2D tex; uniform vec2 px;
+      // พื้นหลัง: bgMode 0 = ปิด, 1 = ตัดภาพ (โปร่งใส), 2 = เบลอ, 3 = รูป · maskTex = ความมั่นใจว่าเป็นคน · bgCover = ครอปรูปแบบ cover
+      uniform sampler2D maskTex, bgTex; uniform float bgMode; uniform vec4 bgCover;
       uniform float smoothAmt, glow, bright, contrast, sat, warm, sepia, vignette;
       uniform float faceOn, aspect, foundation, teeth, eyeBright, lipAmt, blushAmt, needBlur;
       // จุดดัด: wp.xy = ศูนย์กลาง, wp.zw = จุดปลายทาง (ดัน) หรือ wp.z = อัตราขยาย (ขยาย/ย่อ) · wq.x = รัศมี, wq.y = ชนิด (1 ดัน, 2 ขยาย)
@@ -171,6 +174,13 @@ class CameraFX {
           float bm = max(circ(t, cheeks.xy, cheekR), circ(t, cheeks.zw, cheekR)) * m;
           c = mix(c, c * mix(vec3(1.), blushCol * 1.35, .55), bm * blushAmt * .7);
         }
+        // พื้นหลัง: ผสมคน (หน้ากาก) กับพื้นหลังใหม่ — ขอบนุ่มด้วย smoothstep
+        float pm = 1.;
+        if (bgMode > .5) {
+          pm = smoothstep(.45, .78, texture2D(maskTex, uv).r);
+          if (bgMode > 2.5) c = mix(texture2D(bgTex, suv * bgCover.xy + bgCover.zw).rgb, c, pm);
+          else if (bgMode > 1.5) c = mix(texture2D(bgTex, uv).rgb, c, pm);
+        }
         c += bright * .3;
         c = (c - .5) * (1. + contrast) + .5;
         float g = dot(c, LUM);
@@ -179,7 +189,7 @@ class CameraFX {
         vec3 sp = vec3(dot(c, vec3(.393,.769,.189)), dot(c, vec3(.349,.686,.168)), dot(c, vec3(.272,.534,.131)));
         c = mix(c, sp, sepia);
         c *= 1. - vignette * smoothstep(.35, .8, distance(uv, vec2(.5)));
-        gl_FragColor = vec4(clamp(c, 0., 1.), 1.);
+        gl_FragColor = vec4(clamp(c, 0., 1.), bgMode > .5 && bgMode < 1.5 ? pm : 1.);
       }`;
     const sh = (type, src) => {
       const s = gl.createShader(type);
@@ -201,15 +211,31 @@ class CameraFX {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
-    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // 3 texture: 0 = ภาพกล้อง, 1 = หน้ากากคน, 2 = พื้นหลัง (เบลอ/รูป)
+    const mkTex = (unit) => {
+      const tx = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tx);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+      return tx;
+    };
+    this.maskTex = mkTex(1);
+    this.bgTex = mkTex(2);
+    this.camTex = mkTex(0); // ผูกไว้ที่ unit 0 เป็นตัวสุดท้าย
+    gl.uniform1i(gl.getUniformLocation(prog, 'tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'maskTex'), 1);
+    gl.uniform1i(gl.getUniformLocation(prog, 'bgTex'), 2);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    this.bg = null;
+    this.bgUploaded = null;
     this.u = {};
     for (const n of ['px', 'mirror', 'smoothAmt', 'glow', 'bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette',
       'faceOn', 'aspect', 'foundation', 'teeth', 'eyeBright', 'lipAmt', 'blushAmt', 'needBlur',
-      'wp', 'wq', 'rg', 'rgb2', 'mouthO', 'mouthI', 'lipCol', 'blushCol', 'eyeL', 'eyeR', 'cheeks', 'cheekR']) this.u[n] = gl.getUniformLocation(prog, n);
+      'wp', 'wq', 'rg', 'rgb2', 'mouthO', 'mouthI', 'lipCol', 'blushCol', 'eyeL', 'eyeR', 'cheeks', 'cheekR', 'bgMode', 'bgCover']) this.u[n] = gl.getUniformLocation(prog, n);
     this.face = null;
     this.wpBuf = new Float32Array(28 * 4);
     this.wqBuf = new Float32Array(28 * 2);
@@ -220,6 +246,11 @@ class CameraFX {
   // ตั้งค่าบิวตี้ใบหน้าของเฟรมนี้ (จาก buildFaceFx() ใน face.js) หรือ null = ไม่มีใบหน้า
   setFace(f) {
     this.face = f;
+  }
+
+  // พื้นหลังของเฟรมนี้: { mode: 'remove'|'blur'|'image', mask: {data,w,h}, source: canvas/รูป, static: true = รูปไม่เปลี่ยน (อัปโหลดครั้งเดียว) } หรือ null
+  setBackground(b) {
+    this.bg = b;
   }
 
   // คืน canvas ที่ประมวลผลแล้ว (ย่อไม่เกิน 1280 กว้าง เพื่อให้ลื่น)
@@ -236,9 +267,32 @@ class CameraFX {
       this.canvas.height = h;
       gl.viewport(0, 0, w, h);
     }
+    const u = this.u;
+    const bg = this.bg;
+    const mode = bg && bg.mask ? { remove: 1, blur: 2, image: 3 }[bg.mode] || 0 : 0;
+    gl.uniform1f(u.bgMode, mode);
+    if (mode) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, bg.mask.w, bg.mask.h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, bg.mask.data);
+      if (mode > 1 && bg.source && (!bg.static || this.bgUploaded !== bg.source)) {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this.bgTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, bg.source);
+        this.bgUploaded = bg.static ? bg.source : null;
+      }
+      if (mode === 3 && bg.source) {
+        // ครอปรูปแบบ cover ให้เต็มกรอบกล้อง
+        const A = w / h;
+        const I = (bg.source.naturalWidth || bg.source.width) / (bg.source.naturalHeight || bg.source.height);
+        if (I > A) gl.uniform4f(u.bgCover, A / I, 1, (1 - A / I) / 2, 0);
+        else gl.uniform4f(u.bgCover, 1, I / A, 0, (1 - I / A) / 2);
+      }
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.camTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
     const p = this.params;
-    const u = this.u;
     gl.uniform2f(u.px, 1 / w, 1 / h);
     gl.uniform1f(u.mirror, p.mirror ? 1 : 0);
     gl.uniform1f(u.smoothAmt, p.smooth);
