@@ -340,7 +340,8 @@ function drawLayerContent(l) {
   // กล้อง: จับใบหน้า (ถ้าเปิดหน้าเรียว/สติกเกอร์) → ฟิลเตอร์ WebGL → ครอปแบบ cover ให้เต็มกรอบ
   const compare = $('fxCompare').checked;
   const face = faceWanted() ? faceTracker.update(v) : null;
-  fx.setWarp(!compare && face ? slimWarp(face, v, faceCfg.slim / 100) : null);
+  fx.params.foundation = (faceCfg.foundation || 0) / 100; // รองพื้นใช้ได้แม้ยังไม่เจอใบหน้า
+  fx.setFace(!compare && face ? buildFaceFx(face, v, faceCfg) : null);
   const src = (compare ? null : fx.process(v)) || v;
   const sw = src.width || v.videoWidth;
   const sh = src.height || v.videoHeight;
@@ -358,6 +359,35 @@ function drawLayerContent(l) {
   }
   ctx2d.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, x, y, w, h);
   ctx2d.restore();
+
+  // กรอบกล้อง
+  if (l.frame && l.frame !== 'none') {
+    const lw = Math.max(3, Math.min(w, h) * 0.014);
+    ctx2d.save();
+    ctx2d.beginPath();
+    if (l.shape === 'circle') ctx2d.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    else ctx2d.roundRect(x, y, w, h, l.shape === 'round' ? Math.min(w, h) * 0.06 : 0);
+    ctx2d.lineWidth = lw;
+    if (l.frame === 'glow') {
+      const g = ctx2d.createLinearGradient(x, y + h, x + w, y);
+      g.addColorStop(0, '#7dd3fc');
+      g.addColorStop(0.5, '#e9d5ff');
+      g.addColorStop(1, '#fda4af');
+      ctx2d.strokeStyle = g;
+      ctx2d.shadowColor = 'rgba(244, 114, 182, .85)';
+      ctx2d.shadowBlur = lw * 5;
+    } else if (l.frame === 'neon') {
+      ctx2d.strokeStyle = '#ff4d8d';
+      ctx2d.shadowColor = '#ff4d8d';
+      ctx2d.shadowBlur = lw * 6;
+    } else {
+      ctx2d.strokeStyle = '#fff';
+      ctx2d.shadowColor = 'rgba(0,0,0,.35)';
+      ctx2d.shadowBlur = lw * 2;
+    }
+    ctx2d.stroke();
+    ctx2d.restore();
+  }
 
   // สติกเกอร์: วาดนอกกรอบตัด (หูกระต่าย/เขาโผล่พ้นกรอบกล้องได้)
   if (face && faceCfg.sticker && !compare) {
@@ -558,6 +588,7 @@ function renderLayerPanel() {
   $('lyOpacity').value = Math.round((selected.opacity ?? 1) * 100);
   $('lyOpacityLabel').textContent = $('lyOpacity').value + '%';
   document.querySelectorAll('[data-shape]').forEach((b) => b.classList.toggle('primary', b.dataset.shape === selected.shape));
+  document.querySelectorAll('[data-frame]').forEach((b) => b.classList.toggle('primary', b.dataset.frame === (selected.frame || 'none')));
   if (selected.kind === 'web') {
     const k = selected.key || {};
     document.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('primary', (b.dataset.key === 'off' && !k.color) || b.dataset.key === k.mode));
@@ -623,6 +654,12 @@ document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => {
   selected.pa = selected.shape === 'circle' ? 1 : selected.preset === 'full' ? canvas.width / canvas.height : contentAspect(selected);
   selected.w = keepW;
   clampLayer(selected);
+  renderLayerPanel();
+  saveLayout();
+}));
+document.querySelectorAll('[data-frame]').forEach((b) => (b.onclick = () => {
+  if (!selected) return;
+  selected.frame = b.dataset.frame;
   renderLayerPanel();
   saveLayout();
 }));
@@ -707,14 +744,14 @@ $('cropReset').onclick = () => { if (selected) { setCrop(selected, { t: 0, b: 0,
 
 // ---------- จำการจัดวาง ----------
 function saveLayout() {
-  store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity })));
+  store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity, frame: l.frame })));
   saveImagesSoon();
 }
 const savedLayout = store.get('layout', []);
 function restoreLayout(l) {
   const s = savedLayout.find((x) => x.kind === l.kind);
   if (!s) return false;
-  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape, opacity: s.opacity ?? 1 });
+  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape, opacity: s.opacity ?? 1, frame: s.frame || 'none' });
   if (l.preset) applyPreset(l, l.preset);
   return true;
 }
@@ -1032,16 +1069,15 @@ $('chatPin').onclick = () => {
 };
 showChat(chatCfg.tab || 'youtube');
 
-// ---------- ฟิลเตอร์กล้อง ----------
-const FX_KEYS = ['smooth', 'glow', 'bright', 'contrast', 'sat', 'warm'];
-const FX_SCALE = { smooth: 100, glow: 100, bright: 100, contrast: 100, sat: 100, warm: 100 };
+// ---------- ฟิลเตอร์สี ----------
+const FX_KEYS = ['bright', 'contrast', 'sat', 'warm'];
 Object.assign(fx.params, store.get('fx', {}));
 let fxPreset = store.get('fxPreset', 'normal');
 
 function syncFxUi() {
   for (const k of FX_KEYS) {
     const input = document.querySelector(`[data-fx="${k}"]`);
-    input.value = Math.round(fx.params[k] * FX_SCALE[k]);
+    input.value = Math.round(fx.params[k] * 100);
     document.querySelector(`[data-out="${k}"]`).textContent = input.value;
   }
   $('fxMirror').checked = fx.params.mirror;
@@ -1067,16 +1103,16 @@ for (const [id, p] of Object.entries(FX_PRESETS)) {
 document.querySelectorAll('[data-fx]').forEach((input) => {
   input.oninput = () => {
     const k = input.dataset.fx;
-    fx.params[k] = input.value / FX_SCALE[k];
-    document.querySelector(`[data-out="${k}"]`).textContent = input.value;
-    if (!['smooth', 'glow'].includes(k)) fxPreset = '';
+    fx.params[k] = input.value / 100;
+    fxPreset = '';
     syncFxUi();
     saveFx();
   };
 });
 $('fxMirror').onchange = () => { fx.params.mirror = $('fxMirror').checked; saveFx(); };
 $('fxReset').onclick = () => {
-  Object.assign(fx.params, { smooth: 0.4, glow: 0.2, mirror: true }, (({ name, ...v }) => v)(FX_PRESETS.normal));
+  const { name, ...vals } = FX_PRESETS.normal;
+  Object.assign(fx.params, vals); // คงค่าผิวเนียน/ผิวสว่างไว้
   fxPreset = 'normal';
   syncFxUi();
   saveFx();
@@ -1084,15 +1120,23 @@ $('fxReset').onclick = () => {
 if (!fx.gl) toast('เบราว์เซอร์นี้ไม่รองรับ WebGL — ฟิลเตอร์กล้องใช้ไม่ได้');
 syncFxUi();
 
-// ---------- ใบหน้า: หน้าเรียว + สติกเกอร์ ----------
+// ---------- บิวตี้ใบหน้า (แบบแผงของ TikTok LIVE Studio) ----------
 const faceTracker = new FaceTracker();
-const faceCfg = Object.assign({ slim: 0, sticker: '' }, store.get('face', {}));
-const faceWanted = () => faceTracker.state === 'ready' && (faceCfg.slim > 0 || !!faceCfg.sticker);
+const faceCfg = Object.assign({ sticker: '', lipColor: LIP_COLORS[0], blushColor: BLUSH_COLORS[0] }, store.get('face', {}));
+// ผิวเนียน/ผิวสว่างเก็บใน fx.params (ใช้ได้โดยไม่ต้องจับใบหน้า) — ค่าเก่า 0–1 แปลงเป็น 0–100
+const beautyGet = (item) => (item.fx ? Math.round((fx.params[item.key] || 0) * 100) : faceCfg[item.key] || 0);
+function beautySet(item, val) {
+  if (item.fx) {
+    fx.params[item.key] = val / 100;
+    saveFx();
+  } else faceCfg[item.key] = val;
+}
+const needFace = () => FACE_KEYS.some((k) => faceCfg[k]) || !!faceCfg.sticker;
+const faceWanted = () => faceTracker.state === 'ready' && needFace();
 
 function renderFaceStatus() {
-  const on = faceCfg.slim > 0 || faceCfg.sticker;
   const msg = {
-    off: on ? '' : 'เปิดหน้าเรียวหรือเลือกสติกเกอร์ ระบบจะโหลดตัวจับใบหน้า (ครั้งแรก ~10 MB)',
+    off: needFace() ? '' : 'ปรับรูปหน้า/ตา/ปาก หรือสติกเกอร์ ระบบจะโหลดตัวจับใบหน้า (ครั้งแรก ~10 MB)',
     loading: '⏳ กำลังโหลดระบบจับใบหน้า…',
     ready: getLayer('cam')?.stream ? (faceTracker.face ? '✅ เจอใบหน้าแล้ว' : '👀 กำลังหาใบหน้า — หันหน้าเข้ากล้อง') : 'เปิดกล้องในแท็บ “ฉาก” ก่อน',
     error: '⚠️ โหลดระบบจับใบหน้าไม่ได้ — เช็กอินเทอร์เน็ตแล้วลองใหม่',
@@ -1101,19 +1145,112 @@ function renderFaceStatus() {
 }
 function ensureFace() {
   store.set('face', faceCfg);
-  if ((faceCfg.slim > 0 || faceCfg.sticker) && (faceTracker.state === 'off' || faceTracker.state === 'error')) {
+  if (needFace() && (faceTracker.state === 'off' || faceTracker.state === 'error')) {
     faceTracker.load().catch(() => {}).finally(renderFaceStatus);
   }
   renderFaceStatus();
 }
 
-$('faceSlim').value = faceCfg.slim;
-$('faceSlimLabel').textContent = faceCfg.slim;
-$('faceSlim').oninput = () => {
-  faceCfg.slim = +$('faceSlim').value;
-  $('faceSlimLabel').textContent = faceCfg.slim;
+// แท็บย่อย: หมวดบิวตี้ + ฟิลเตอร์ + สติกเกอร์
+const BEAUTY_TABS = [...BEAUTY_GROUPS.map((g) => ({ id: g.id, name: g.name })), { id: 'filter', name: 'ฟิลเตอร์' }, { id: 'sticker', name: 'สติกเกอร์' }];
+let beautyTab = store.get('beautyTab', 'skin');
+let beautyItem = null;
+
+function renderBeauty() {
+  $('beautyTabs').innerHTML = '';
+  for (const t of BEAUTY_TABS) {
+    const b = document.createElement('button');
+    b.textContent = t.name;
+    b.className = t.id === beautyTab ? 'active' : '';
+    b.onclick = () => {
+      beautyTab = t.id;
+      store.set('beautyTab', t.id);
+      beautyItem = null;
+      renderBeauty();
+    };
+    $('beautyTabs').append(b);
+  }
+  const group = BEAUTY_GROUPS.find((g) => g.id === beautyTab);
+  $('filterPane').hidden = beautyTab !== 'filter';
+  $('stickerPane').hidden = beautyTab !== 'sticker';
+  $('beautyItems').hidden = !group;
+  $('beautySliderRow').hidden = !group;
+  $('beautyColors').hidden = true;
+  if (!group) return;
+  if (!beautyItem || !group.items.includes(beautyItem)) beautyItem = group.items[0];
+
+  $('beautyItems').innerHTML = '';
+  for (const it of group.items) {
+    const b = document.createElement('button');
+    b.className = 'beauty-item' + (it === beautyItem ? ' active' : '') + (beautyGet(it) ? ' on' : '');
+    b.innerHTML = `<span class="bi-icon">${it.icon}</span><span class="bi-label">${esc(it.label)}</span>`;
+    b.onclick = () => {
+      beautyItem = it;
+      renderBeauty();
+    };
+    $('beautyItems').append(b);
+  }
+  const s = $('beautySlider');
+  s.min = beautyItem.min ?? 0;
+  s.max = 100;
+  s.value = beautyGet(beautyItem);
+  s.classList.toggle('bipolar', (beautyItem.min ?? 0) < 0);
+  $('beautyItemName').textContent = beautyItem.label;
+  $('beautyValue').textContent = s.value;
+
+  if (beautyItem.colors) {
+    const list = beautyItem.colors === 'lipColor' ? LIP_COLORS : BLUSH_COLORS;
+    const box = $('beautyColors');
+    box.hidden = false;
+    box.innerHTML = '';
+    for (const c of list) {
+      const b = document.createElement('button');
+      b.className = 'swatch' + (faceCfg[beautyItem.colors] === c ? ' active' : '');
+      b.style.background = c;
+      b.title = c;
+      b.onclick = () => {
+        faceCfg[beautyItem.colors] = c;
+        if (!beautyGet(beautyItem)) beautySet(beautyItem, 40); // เลือกสีแล้วเปิดให้เลย
+        ensureFace();
+        renderBeauty();
+      };
+      box.append(b);
+    }
+  }
+}
+$('beautySlider').oninput = () => {
+  beautySet(beautyItem, +$('beautySlider').value);
+  $('beautyValue').textContent = $('beautySlider').value;
+  // จุดบอกว่าเปิดใช้อยู่ ใต้ไอคอน
+  [...$('beautyItems').children].forEach((b, i) => {
+    const it = BEAUTY_GROUPS.find((g) => g.id === beautyTab).items[i];
+    b.classList.toggle('on', !!beautyGet(it));
+  });
+  renderStyles();
   ensureFace();
 };
+
+// สไตล์สำเร็จรูป
+function renderStyles() {
+  const box = $('beautyStyles');
+  box.innerHTML = '';
+  for (const [id, st] of Object.entries(BEAUTY_STYLES)) {
+    const b = document.createElement('button');
+    b.textContent = st.name;
+    b.className = faceCfg.style === id ? 'active' : '';
+    b.onclick = () => applyBeautyStyle(id);
+    box.append(b);
+  }
+}
+function applyBeautyStyle(id) {
+  const st = BEAUTY_STYLES[id];
+  for (const it of BEAUTY_GROUPS.flatMap((g) => g.items)) beautySet(it, st ? st.v[it.key] || 0 : 0);
+  faceCfg.style = id;
+  ensureFace();
+  renderStyles();
+  renderBeauty();
+}
+$('beautyReset').onclick = () => applyBeautyStyle('');
 
 function renderStickers() {
   const box = $('stickerChips');
@@ -1130,6 +1267,10 @@ function renderStickers() {
     box.append(b);
   }
 }
+
+// ค่าจากเวอร์ชันก่อน (หน้าเรียวแยก) ยังใช้ได้ เพราะใช้ key เดียวกัน (slim)
+renderStyles();
+renderBeauty();
 renderStickers();
 ensureFace();
 setInterval(() => faceTracker.state === 'ready' && renderFaceStatus(), 1000);

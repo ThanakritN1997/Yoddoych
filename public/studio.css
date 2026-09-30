@@ -204,6 +204,41 @@ body.studio-page {
 .meter { height: 8px; background: #0f1219; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; margin-top: 10px; }
 .meter div { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), #a3e635, var(--warn)); transition: width .08s; }
 
+/* ---------- แผงบิวตี้ (แบบ TikTok LIVE Studio) ---------- */
+.beauty-head { display: flex; justify-content: space-between; align-items: center; }
+.beauty-head h2 { margin: 0 !important; }
+.reset-btn { font-size: 20px; color: var(--muted); }
+.reset-btn:hover { color: var(--text); }
+.style-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.style-chips button, .pill-tabs button {
+  font: inherit; font-size: 13px; border: 1px solid var(--line-2); background: #0f1219; color: var(--text); border-radius: 99px; padding: 5px 12px; cursor: pointer;
+}
+.style-chips button.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }
+.pill-tabs { display: flex; gap: 4px; overflow-x: auto; margin: 14px 0 10px; padding-bottom: 2px; scrollbar-width: none; }
+.pill-tabs button { flex: none; border: 0; background: none; color: var(--muted); font-weight: 600; border-radius: 8px; }
+.pill-tabs button.active { background: #232837; color: var(--text); }
+.beauty-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px 4px; }
+.beauty-item { font: inherit; background: none; border: 0; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; position: relative; }
+.bi-icon {
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 19px;
+  background: #0f1219; border: 1.5px solid var(--line-2); transition: border-color .15s, box-shadow .15s;
+}
+.bi-label { font-size: 11px; line-height: 1.25; text-align: center; }
+.beauty-item:hover .bi-icon { border-color: #56607a; }
+.beauty-item.active .bi-icon { border-color: #fff; box-shadow: 0 0 0 3px rgba(124, 92, 255, .35); }
+.beauty-item.active .bi-label { color: var(--text); font-weight: 600; }
+.beauty-item.on::after { content: ""; position: absolute; top: 46px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent-2); }
+.beauty-slider { display: grid; grid-template-columns: auto 1fr 36px; align-items: center; gap: 10px; margin-top: 14px; background: #0f1219; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.beauty-name { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.beauty-val { font-size: 14px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.beauty-slider input.bipolar { background: linear-gradient(90deg, transparent calc(50% - 1px), #56607a calc(50% - 1px), #56607a calc(50% + 1px), transparent calc(50% + 1px)); }
+.swatches { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .15); cursor: pointer; }
+.swatch.active { border-color: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .15); }
+.face-status { margin-top: 10px !important; }
+#filterPane .fx-chips { margin-bottom: 4px; }
+#filterPane .btn { margin-top: 10px; }
+
 /* ---------- ปลายทาง ---------- */
 .dest-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
 .dest { border: 1px solid var(--line-2); border-radius: 11px; padding: 10px; display: grid; gap: 6px; background: #0f1219; }

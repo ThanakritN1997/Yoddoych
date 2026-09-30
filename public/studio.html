@@ -211,6 +211,13 @@
                 <button class="btn small" data-shape="round">มุมมน</button>
                 <button class="btn small" data-shape="circle">วงกลม</button>
               </div>
+              <div class="sub-title" style="margin-top:8px">กรอบกล้อง</div>
+              <div class="seg">
+                <button class="btn small" data-frame="none">ไม่มี</button>
+                <button class="btn small" data-frame="glow">ไล่สีเรืองแสง</button>
+                <button class="btn small" data-frame="white">ขาว</button>
+                <button class="btn small" data-frame="neon">นีออนชมพู</button>
+              </div>
             </div>
           </div>
 
@@ -243,40 +250,51 @@
           </div>
         </section>
 
-        <section class="card">
-          <h2>ใบหน้า <span class="tag">AI</span></h2>
-          <label class="field">หน้าเรียว <span id="faceSlimLabel" class="muted small">0</span>
-            <input id="faceSlim" type="range" min="0" max="100" value="0">
-          </label>
-          <div class="field">สติกเกอร์ติดหน้า</div>
-          <div id="stickerChips" class="sticker-grid"></div>
-          <p id="faceStatus" class="muted small"></p>
-        </section>
-
-        <section class="card">
-          <h2>ผิว &amp; ฟิลเตอร์</h2>
-          <div id="fxPresets" class="chips fx-chips"></div>
-          <div class="grid2">
-            <label class="field">หน้าเนียน <span class="muted small" data-out="smooth"></span>
-              <input type="range" min="0" max="100" data-fx="smooth">
-            </label>
-            <label class="field">ผิวสว่าง <span class="muted small" data-out="glow"></span>
-              <input type="range" min="0" max="100" data-fx="glow">
-            </label>
-            <label class="field">ความสว่าง <span class="muted small" data-out="bright"></span>
-              <input type="range" min="-50" max="50" data-fx="bright">
-            </label>
-            <label class="field">คอนทราสต์ <span class="muted small" data-out="contrast"></span>
-              <input type="range" min="-50" max="50" data-fx="contrast">
-            </label>
-            <label class="field">ความสดของสี <span class="muted small" data-out="sat"></span>
-              <input type="range" min="-100" max="100" data-fx="sat">
-            </label>
-            <label class="field">โทนเย็น ↔ อุ่น <span class="muted small" data-out="warm"></span>
-              <input type="range" min="-100" max="100" data-fx="warm">
-            </label>
+        <section class="card beauty">
+          <div class="beauty-head">
+            <h2>บิวตี้ <span class="tag">AI</span></h2>
+            <button id="beautyReset" class="icon-btn reset-btn" title="รีเซ็ตทั้งหมด" aria-label="รีเซ็ตทั้งหมด">↺</button>
           </div>
-          <button id="fxReset" class="btn small">รีเซ็ตผิว &amp; ฟิลเตอร์</button>
+          <div class="field">สไตล์สำเร็จรูป</div>
+          <div id="beautyStyles" class="style-chips"></div>
+
+          <div id="beautyTabs" class="pill-tabs" role="tablist"></div>
+
+          <!-- รายการปรับ: กดไอคอน แล้วปรับด้วยแถบเลื่อนด้านล่าง -->
+          <div id="beautyItems" class="beauty-items"></div>
+          <div id="beautySliderRow" class="beauty-slider">
+            <span id="beautyItemName" class="beauty-name"></span>
+            <input id="beautySlider" type="range" min="0" max="100" value="0">
+            <span id="beautyValue" class="beauty-val">0</span>
+          </div>
+          <div id="beautyColors" class="swatches" hidden></div>
+
+          <!-- ฟิลเตอร์สี -->
+          <div id="filterPane" hidden>
+            <div id="fxPresets" class="chips fx-chips"></div>
+            <div class="grid2">
+              <label class="field">ความสว่าง <span class="muted small" data-out="bright"></span>
+                <input type="range" min="-50" max="50" data-fx="bright">
+              </label>
+              <label class="field">คอนทราสต์ <span class="muted small" data-out="contrast"></span>
+                <input type="range" min="-50" max="50" data-fx="contrast">
+              </label>
+              <label class="field">ความสดของสี <span class="muted small" data-out="sat"></span>
+                <input type="range" min="-100" max="100" data-fx="sat">
+              </label>
+              <label class="field">โทนเย็น ↔ อุ่น <span class="muted small" data-out="warm"></span>
+                <input type="range" min="-100" max="100" data-fx="warm">
+              </label>
+            </div>
+            <button id="fxReset" class="btn small">รีเซ็ตฟิลเตอร์</button>
+          </div>
+
+          <!-- สติกเกอร์ -->
+          <div id="stickerPane" hidden>
+            <div id="stickerChips" class="sticker-grid"></div>
+          </div>
+
+          <p id="faceStatus" class="muted small face-status"></p>
         </section>
       </div>
 

@@ -5,7 +5,13 @@ const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSI
 const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
 // จุดบนใบหน้าที่ใช้ (ดัชนีของ MediaPipe face mesh 468 จุด) · ซ้าย/ขวา = ซ้าย/ขวาของภาพกล้อง
-const LM = { top: 10, chin: 152, nose: 1, l: 234, r: 454, lEyeO: 33, lEyeI: 133, rEyeO: 263, rEyeI: 362, lCheek: 50, rCheek: 280, lJaw: 172, rJaw: 397, lMid: 132, rMid: 361 };
+const LM = {
+  top: 10, chin: 152, nose: 1, bridge: 6, l: 234, r: 454,
+  lEyeO: 33, lEyeI: 133, lEyeT: 159, lEyeB: 145, rEyeO: 263, rEyeI: 362, rEyeT: 386, rEyeB: 374,
+  lBrow: 105, rBrow: 334, noseL: 129, noseR: 358,
+  mL: 61, mR: 291, mT: 13, mB: 14, lipT: 0, lipB: 17,
+  lCheek: 50, rCheek: 280, lJaw: 172, rJaw: 397, lMid: 132, rMid: 361, lJaw2: 58, rJaw2: 288, lFold: 205, rFold: 425,
+};
 
 class FaceTracker {
   constructor() {
@@ -69,17 +75,141 @@ class FaceTracker {
   }
 }
 
-// ค่าที่ส่งให้ shader หน้าเรียว (พิกัด texture 0–1 ของภาพกล้อง)
-function slimWarp(face, video, amount) {
-  if (!face || amount <= 0) return null;
+// ---------- รายการปรับบิวตี้ (แบบแผงของ TikTok LIVE Studio) ----------
+// min < 0 = ปรับได้สองทาง (เช่น คางสั้น ↔ ยาว) · face: true = ต้องจับใบหน้า
+const BEAUTY_GROUPS = [
+  { id: 'skin', name: 'ความงาม', items: [
+    { key: 'smooth', label: 'ผิวเนียน', icon: '💧', fx: true },
+    { key: 'foundation', label: 'รองพื้น', icon: '🧴' },
+    { key: 'glow', label: 'ผิวสว่าง', icon: '✨', fx: true },
+    { key: 'teeth', label: 'ฟันขาว', icon: '🦷', face: true },
+    { key: 'eyeBright', label: 'ตาสว่าง', icon: '👁️', face: true },
+    { key: 'underEye', label: 'ลบถุงใต้ตา', icon: '🌙', face: true },
+    { key: 'folds', label: 'ลดร่องแก้ม', icon: '〰️', face: true },
+    { key: 'contour', label: 'คอนทัวร์', icon: '🌗', face: true },
+    { key: 'highlight', label: 'ไฮไลต์', icon: '💡', face: true },
+  ] },
+  { id: 'shape', name: 'รูปหน้า', items: [
+    { key: 'slim', label: 'หน้าเรียว', icon: '🙂', face: true },
+    { key: 'vshape', label: 'หน้าวี', icon: '🔻', face: true },
+    { key: 'small', label: 'หน้าเล็ก', icon: '🤏', face: true },
+    { key: 'cheekbone', label: 'โหนกแก้ม', icon: '◐', face: true },
+    { key: 'jaw', label: 'กราม', icon: '🦴', face: true },
+    { key: 'chin', label: 'คาง', icon: '⤓', face: true, min: -100 },
+    { key: 'forehead', label: 'หน้าผาก', icon: '⤒', face: true, min: -100 },
+  ] },
+  { id: 'features', name: 'ตา·จมูก·ปาก', items: [
+    { key: 'eyeSize', label: 'ตาโต', icon: '👀', face: true },
+    { key: 'eyeDist', label: 'ระยะห่างตา', icon: '↔️', face: true, min: -100 },
+    { key: 'eyeTilt', label: 'หางตา', icon: '↗️', face: true, min: -100 },
+    { key: 'noseNarrow', label: 'จมูกเล็ก', icon: '👃', face: true },
+    { key: 'noseLength', label: 'ความยาวจมูก', icon: '↕️', face: true, min: -100 },
+    { key: 'mouthSize', label: 'ขนาดปาก', icon: '👄', face: true, min: -100 },
+    { key: 'smile', label: 'มุมปากยิ้ม', icon: '😊', face: true },
+    { key: 'browHeight', label: 'ความสูงคิ้ว', icon: '〽️', face: true, min: -100 },
+  ] },
+  { id: 'makeup', name: 'แต่งหน้า', items: [
+    { key: 'lip', label: 'ลิปสติก', icon: '💄', face: true, colors: 'lipColor' },
+    { key: 'blush', label: 'บลัชออน', icon: '🌸', face: true, colors: 'blushColor' },
+  ] },
+];
+const LIP_COLORS = ['#d6284f', '#e2566e', '#c0392b', '#b5476b', '#ff6f91', '#8e2440'];
+const BLUSH_COLORS = ['#ff7fa6', '#ff9a8b', '#f78fb3', '#e98a6a', '#ff6b81'];
+const FACE_KEYS = BEAUTY_GROUPS.flatMap((g) => g.items).filter((i) => i.face).map((i) => i.key);
+
+// สไตล์สำเร็จรูป (ค่าที่ไม่ได้ระบุ = 0)
+const BEAUTY_STYLES = {
+  natural: { name: 'ธรรมชาติ', v: { smooth: 40, foundation: 20, glow: 15, slim: 15, eyeSize: 10, teeth: 20, underEye: 30 } },
+  sweet: { name: 'หวานใส', v: { smooth: 55, foundation: 35, glow: 25, slim: 30, vshape: 20, eyeSize: 25, noseNarrow: 20, lip: 35, blush: 35, teeth: 30, eyeBright: 30, underEye: 40 } },
+  korean: { name: 'เกาหลี', v: { smooth: 60, foundation: 45, glow: 28, slim: 35, vshape: 30, small: 15, eyeSize: 20, noseNarrow: 25, lip: 25, blush: 20, underEye: 50, highlight: 30 } },
+  sharp: { name: 'หล่อคม', v: { smooth: 35, foundation: 15, jaw: 20, contour: 40, highlight: 25, noseNarrow: 15, eyeBright: 25, teeth: 25, underEye: 35 } },
+};
+
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+
+// แปลงค่าบิวตี้ + จุดบนใบหน้า → ค่าที่ส่งให้ shader (พิกัด texture 0–1 ของภาพกล้อง, รัศมีหน่วย = ความสูงภาพ)
+function buildFaceFx(face, video, cfg) {
+  if (!face) return null;
+  const v = (k) => (cfg[k] || 0) / 100;
   const aspect = video.videoWidth / video.videoHeight;
+  const P = face;
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const c1 = mid(face.lMid, face.lJaw);
-  const c2 = mid(face.rMid, face.rJaw);
-  const k = 0.2 * amount; // ดึงแก้ม/กรามเข้าหาจมูก สูงสุด ~20% ของระยะ
-  const toward = (c) => ({ x: c.x + (face.nose.x - c.x) * k, y: c.y + (face.nose.y - c.y) * k * 0.4 });
-  const faceW = Math.hypot((face.r.x - face.l.x) * aspect, face.r.y - face.l.y); // หน่วย = ความสูงภาพ
-  return { c1, m1: toward(c1), c2, m2: toward(c2), radius: faceW * 0.42, aspect };
+  const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  const add = (a, d, k) => ({ x: a.x + d.x * k, y: a.y + d.y * k });
+  const dH = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+  const faceW = dH(P.l, P.r);
+  // ทิศ "ขึ้น" ของหัว (ในพิกัด texture) จากคาง → หน้าผาก
+  const upA = { x: (P.top.x - P.chin.x) * aspect, y: P.top.y - P.chin.y };
+  const upLen = Math.hypot(upA.x, upA.y) || 1;
+  const up = { x: upA.x / upLen / aspect, y: upA.y / upLen }; // ยาว 1 หน่วยความสูง
+  const eyeCL = mid(P.lEyeO, P.lEyeI);
+  const eyeCR = mid(P.rEyeO, P.rEyeI);
+  const eyeW = dH(P.lEyeO, P.lEyeI);
+  const noseW = dH(P.noseL, P.noseR);
+  const mouthW = dH(P.mL, P.mR);
+  const mouthC = mid(P.mT, P.mB);
+
+  const warps = [];
+  const push = (c, m, r) => warps.push({ c, m, r }); // ดัน c → m
+  const zoom = (c, s, r) => warps.push({ c, s, r }); // s > 0 ขยาย, s < 0 ย่อ
+  const toward = (c, target, k) => lerp(c, target, k);
+
+  if (v('slim')) for (const c of [mid(P.lMid, P.lJaw), mid(P.rMid, P.rJaw)]) push(c, { x: toward(c, P.nose, 0.2 * v('slim')).x, y: c.y + (P.nose.y - c.y) * 0.08 * v('slim') }, faceW * 0.42);
+  if (v('vshape')) for (const c of [P.lJaw, P.rJaw]) push(c, toward(c, P.chin, 0.28 * v('vshape')), faceW * 0.3);
+  if (v('jaw')) for (const c of [P.lJaw2, P.rJaw2]) push(c, toward(c, P.nose, 0.15 * v('jaw')), faceW * 0.26);
+  if (v('cheekbone')) for (const c of [P.l, P.r]) push(c, toward(c, P.nose, 0.08 * v('cheekbone')), faceW * 0.3);
+  if (v('small')) zoom(P.nose, -0.12 * v('small'), faceW * 0.8);
+  if (v('chin')) push(P.chin, add(P.chin, up, -faceW * 0.12 * v('chin')), faceW * 0.3);
+  if (v('forehead')) push(P.top, add(P.top, up, faceW * 0.1 * v('forehead')), faceW * 0.45);
+  if (v('eyeSize')) for (const c of [eyeCL, eyeCR]) zoom(c, 0.28 * v('eyeSize'), eyeW * 1.15);
+  if (v('eyeDist')) {
+    push(eyeCL, lerp(eyeCL, eyeCR, -0.07 * v('eyeDist')), eyeW * 1.4);
+    push(eyeCR, lerp(eyeCR, eyeCL, -0.07 * v('eyeDist')), eyeW * 1.4);
+  }
+  if (v('eyeTilt')) for (const c of [P.lEyeO, P.rEyeO]) push(c, add(c, up, eyeW * 0.22 * v('eyeTilt')), eyeW * 0.8);
+  if (v('noseNarrow')) {
+    for (const c of [P.noseL, P.noseR]) push(c, toward(c, P.nose, 0.3 * v('noseNarrow')), noseW * 0.6);
+    zoom(P.nose, -0.12 * v('noseNarrow'), noseW * 0.55);
+  }
+  if (v('noseLength')) push(P.nose, add(P.nose, up, -noseW * 0.25 * v('noseLength')), noseW * 0.9);
+  if (v('mouthSize')) zoom(mouthC, 0.22 * v('mouthSize'), mouthW * 0.75);
+  if (v('smile')) for (const c of [P.mL, P.mR]) push(c, add(c, up, mouthW * 0.08 * v('smile')), mouthW * 0.35);
+  if (v('browHeight')) for (const c of [P.lBrow, P.rBrow]) push(c, add(c, up, faceW * 0.04 * v('browHeight')), faceW * 0.2);
+
+  // บริเวณรีทัช (เนียนขึ้น/สว่างขึ้น/เงา)
+  const regions = [];
+  const region = (c, r, smooth, bright) => regions.push({ c, r, smooth, bright });
+  if (v('underEye')) for (const c of [eyeCL, eyeCR]) region(add(c, up, -eyeW * 0.75), eyeW * 1.05, 0.7 * v('underEye'), 0.45 * v('underEye'));
+  if (v('folds')) for (const [n, m] of [[P.noseL, P.mL], [P.noseR, P.mR]]) region(mid(n, m), mouthW * 0.38, 0.8 * v('folds'), 0.2 * v('folds'));
+  if (v('contour')) for (const [a, b] of [[P.lCheek, P.lJaw], [P.rCheek, P.rJaw]]) region(lerp(a, b, 0.55), faceW * 0.2, 0, -0.55 * v('contour'));
+  if (v('highlight')) {
+    region(P.bridge, noseW * 0.8, 0, 0.5 * v('highlight'));
+    region(lerp(P.top, P.bridge, 0.35), faceW * 0.2, 0, 0.35 * v('highlight'));
+  }
+
+  // ปาก: วงรีรอบริมฝีปาก (นอก) และช่องปาก (ใน) หน่วยพิกัด texture
+  const mx = Math.abs(P.mR.x - P.mL.x) / 2;
+  const mouthO = [ (P.lipT.x + P.lipB.x) / 2, (P.lipT.y + P.lipB.y) / 2, mx * 1.08, Math.abs(P.lipB.y - P.lipT.y) / 2 * 1.2 ];
+  const mouthI = [ mouthC.x, mouthC.y, mx * 0.82, Math.max(Math.abs(P.mB.y - P.mT.y) / 2 * 1.25, 0.002) ];
+  const cheekL = lerp(P.lCheek, P.l, 0.25);
+  const cheekR = lerp(P.rCheek, P.r, 0.25);
+  return {
+    warps,
+    regions,
+    foundation: v('foundation'),
+    teeth: v('teeth'),
+    eyeBright: v('eyeBright'),
+    lipAmt: v('lip'),
+    blushAmt: v('blush'),
+    lipCol: hexRgb(cfg.lipColor || LIP_COLORS[0]),
+    blushCol: hexRgb(cfg.blushColor || BLUSH_COLORS[0]),
+    mouthO,
+    mouthI,
+    eyeL: [eyeCL.x, eyeCL.y, eyeW * 0.85],
+    eyeR: [eyeCR.x, eyeCR.y, eyeW * 0.85],
+    cheeks: [cheekL.x, cheekL.y, cheekR.x, cheekR.y],
+    cheekR: faceW * 0.17,
+  };
 }
 
 // ---------- สติกเกอร์ (วาดเองเป็น SVG) ----------
