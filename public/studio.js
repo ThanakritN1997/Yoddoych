@@ -337,8 +337,11 @@ function drawLayerContent(l) {
     ctx2d.drawImage(v, sx, sy, sw, sh, x, y, w, h);
     return;
   }
-  // กล้อง: ผ่านฟิลเตอร์ WebGL แล้วครอปแบบ cover ให้เต็มกรอบ
-  const src = ($('fxCompare').checked ? null : fx.process(v)) || v;
+  // กล้อง: จับใบหน้า (ถ้าเปิดหน้าเรียว/สติกเกอร์) → ฟิลเตอร์ WebGL → ครอปแบบ cover ให้เต็มกรอบ
+  const compare = $('fxCompare').checked;
+  const face = faceWanted() ? faceTracker.update(v) : null;
+  fx.setWarp(!compare && face ? slimWarp(face, v, faceCfg.slim / 100) : null);
+  const src = (compare ? null : fx.process(v)) || v;
   const sw = src.width || v.videoWidth;
   const sh = src.height || v.videoHeight;
   const s = Math.max(w / sw, h / sh);
@@ -355,6 +358,16 @@ function drawLayerContent(l) {
   }
   ctx2d.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, x, y, w, h);
   ctx2d.restore();
+
+  // สติกเกอร์: วาดนอกกรอบตัด (หูกระต่าย/เขาโผล่พ้นกรอบกล้องได้)
+  if (face && faceCfg.sticker && !compare) {
+    const mirror = fx.params.mirror;
+    const map = (p) => ({
+      x: x + ((mirror ? 1 - p.x : p.x) * sw - (sw - cw) / 2) * (w / cw),
+      y: y + (p.y * sh - (sh - ch) / 2) * (h / ch),
+    });
+    drawSticker(ctx2d, faceCfg.sticker, face, map);
+  }
 }
 
 function draw() {
@@ -1071,6 +1084,74 @@ $('fxReset').onclick = () => {
 if (!fx.gl) toast('เบราว์เซอร์นี้ไม่รองรับ WebGL — ฟิลเตอร์กล้องใช้ไม่ได้');
 syncFxUi();
 
+// ---------- ใบหน้า: หน้าเรียว + สติกเกอร์ ----------
+const faceTracker = new FaceTracker();
+const faceCfg = Object.assign({ slim: 0, sticker: '' }, store.get('face', {}));
+const faceWanted = () => faceTracker.state === 'ready' && (faceCfg.slim > 0 || !!faceCfg.sticker);
+
+function renderFaceStatus() {
+  const on = faceCfg.slim > 0 || faceCfg.sticker;
+  const msg = {
+    off: on ? '' : 'เปิดหน้าเรียวหรือเลือกสติกเกอร์ ระบบจะโหลดตัวจับใบหน้า (ครั้งแรก ~10 MB)',
+    loading: '⏳ กำลังโหลดระบบจับใบหน้า…',
+    ready: getLayer('cam')?.stream ? (faceTracker.face ? '✅ เจอใบหน้าแล้ว' : '👀 กำลังหาใบหน้า — หันหน้าเข้ากล้อง') : 'เปิดกล้องในแท็บ “ฉาก” ก่อน',
+    error: '⚠️ โหลดระบบจับใบหน้าไม่ได้ — เช็กอินเทอร์เน็ตแล้วลองใหม่',
+  }[faceTracker.state];
+  $('faceStatus').textContent = msg;
+}
+function ensureFace() {
+  store.set('face', faceCfg);
+  if ((faceCfg.slim > 0 || faceCfg.sticker) && (faceTracker.state === 'off' || faceTracker.state === 'error')) {
+    faceTracker.load().catch(() => {}).finally(renderFaceStatus);
+  }
+  renderFaceStatus();
+}
+
+$('faceSlim').value = faceCfg.slim;
+$('faceSlimLabel').textContent = faceCfg.slim;
+$('faceSlim').oninput = () => {
+  faceCfg.slim = +$('faceSlim').value;
+  $('faceSlimLabel').textContent = faceCfg.slim;
+  ensureFace();
+};
+
+function renderStickers() {
+  const box = $('stickerChips');
+  box.innerHTML = '';
+  for (const [id, st] of [['', { name: 'ไม่ใส่' }], ...Object.entries(STICKERS)]) {
+    const b = document.createElement('button');
+    b.textContent = st.name;
+    b.className = faceCfg.sticker === id ? 'active' : '';
+    b.onclick = () => {
+      faceCfg.sticker = id;
+      renderStickers();
+      ensureFace();
+    };
+    box.append(b);
+  }
+}
+renderStickers();
+ensureFace();
+setInterval(() => faceTracker.state === 'ready' && renderFaceStatus(), 1000);
+
+// ---------- แท็บแผงตั้งค่า ----------
+function showTab(name) {
+  document.querySelectorAll('.tabs [data-tab]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === name);
+    b.setAttribute('aria-selected', b.dataset.tab === name);
+  });
+  document.querySelectorAll('.tabpanel').forEach((p) => (p.hidden = p.dataset.panel !== name));
+  store.set('tab', name);
+}
+document.querySelectorAll('.tabs [data-tab]').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+showTab(store.get('tab', 'scene'));
+
+$('srcWeb').onclick = () => {
+  $('webDetails').open = true;
+  $('webUrl').focus();
+  $('webDetails').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
 // ---------- เสียง ----------
 const actx = new AudioContext();
 const mixOut = actx.createMediaStreamDestination(); // มีแทร็กเสียงเสมอ (เงียบถ้าไม่มีแหล่ง) เพราะแพลตฟอร์มส่วนใหญ่ต้องการเสียง
@@ -1244,9 +1325,15 @@ function pickMime() {
 async function startLive() {
   calc();
   const active = dests.filter((d) => d.on);
-  if (!active.length) return toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
+  if (!active.length) {
+    showTab('dest');
+    return toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
+  }
   const missing = active.find((d) => !d.url || !d.key);
-  if (missing) return toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
+  if (missing) {
+    showTab('dest');
+    return toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
+  }
   if (!H) {
     showHelperMissing();
     $('helperCard').scrollIntoView({ behavior: 'smooth' });

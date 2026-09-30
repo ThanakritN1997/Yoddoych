@@ -3,43 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1115">
-  <title>สตูดิโอไลฟ์</title>
+  <meta name="theme-color" content="#0b0d12">
+  <title>Yoddoy Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cdefs%3E%3ClinearGradient id=%27g%27 x1=%270%27 y1=%270%27 x2=%271%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%237c5cff%27/%3E%3Cstop offset=%271%27 stop-color=%27%23ff4d8d%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27url(%23g)%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27white%27/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="studio.css">
 </head>
-<body>
-  <header class="top">
-    <a href="./" class="brand">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="3.5" fill="currentColor"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      สตูดิโอไลฟ์
+<body class="studio-page">
+  <!-- แถบบน: แบรนด์ + สถานะ + ปุ่มไลฟ์ (เห็นตลอด) -->
+  <header class="appbar">
+    <a href="./" class="brand" aria-label="Yoddoy Studio">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3.6" fill="currentColor"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-text">Yoddoy <b>Studio</b></span>
     </a>
-    <nav class="row small">
+    <nav class="appnav">
       <a href="./" class="navlink">สะท้อนหน้าจอ</a>
-      <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
     </nav>
+    <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
+    <div class="appbar-spacer"></div>
+    <div id="liveBadge" class="live-badge" hidden><span class="dot"></span> LIVE <span id="liveTime">00:00:00</span></div>
+    <button id="btnLive" class="btn live-cta">เริ่มไลฟ์</button>
   </header>
 
-  <div id="browserWarn" class="browser-warn" hidden>
-    ⚠️ เบราว์เซอร์นี้จับภาพจอ/กล้อง/ไมค์ไม่ได้ — เปิด <b>http://localhost:3000/studio.html</b> ใน <b>Chrome</b> หรือ <b>Edge</b>
+  <div id="browserWarn" class="banner banner-danger" hidden>
+    ⚠️ เบราว์เซอร์นี้จับภาพจอ/กล้อง/ไมค์ไม่ได้ — เปิด <b>https://yoddoych.vercel.app/studio.html</b> ใน <b>Chrome</b> หรือ <b>Edge</b>
     <button id="btnCopyUrl" class="btn small">คัดลอกลิงก์</button>
   </div>
 
-  <section id="helperCard" class="helper-card" hidden>
+  <section id="helperCard" class="banner banner-accent helper-card" hidden>
     <div id="helperDesktop">
       <h2>ติดตั้ง Yoddoy Helper บนเครื่องนี้ (ครั้งเดียว)</h2>
-      <p>ตัวช่วยนี้ทำให้ <b>ไลฟ์ไปทุกแพลตฟอร์ม</b> และ <b>สะท้อนจอ iPhone (AirPlay)</b> ได้ — ภาพ ฟิลเตอร์ และการจัดวางใช้ได้เลยโดยไม่ต้องติดตั้ง</p>
+      <p>ทำให้ <b>ไลฟ์ไปทุกแพลตฟอร์ม</b> และ <b>สะท้อนจอ iPhone</b> ได้ — ภาพ ฟิลเตอร์ และการจัดวางใช้ได้เลยโดยไม่ต้องติดตั้ง</p>
       <ol class="steps">
         <li><a id="helperDownload" class="btn primary small" href="#">⬇ ดาวน์โหลด Yoddoy Helper (Windows)</a></li>
         <li>แตกไฟล์ zip → ดับเบิลคลิก <b>YoddoyHelper.bat</b></li>
-        <li>ถ้า Windows ถามเรื่อง Firewall ให้กด <b>อนุญาต</b> (ติ๊ก Private network)</li>
-        <li>กลับมาที่หน้านี้ — ระบบจะเชื่อมต่อให้อัตโนมัติ</li>
+        <li>ถ้า Windows ถามเรื่อง Firewall ให้กด <b>อนุญาต</b></li>
+        <li>กลับมาที่หน้านี้ — เชื่อมต่อให้อัตโนมัติ</li>
       </ol>
-      <p class="muted small">อยากให้เปิดเองทุกครั้งที่เปิดคอม: ดับเบิลคลิก <b>install-autostart.bat</b> ในโฟลเดอร์เดียวกัน · ใช้ได้กับ Chrome และ Edge</p>
     </div>
     <div id="helperUpdate" hidden>
-      <h2>มี Yoddoy Helper เวอร์ชันใหม่ (แก้ไลฟ์หลุด + ตั้งค่าดีเลย์)</h2>
-      <p>เครื่องนี้ใช้เวอร์ชัน <b id="helperVer"></b> — ปิดหน้าต่าง Yoddoy Helper เดิม แล้วดาวน์โหลดตัวใหม่มาแตกไฟล์ทับ/แทนที่ แล้วเปิด <b>YoddoyHelper.bat</b> อีกครั้ง</p>
+      <h2>มี Yoddoy Helper เวอร์ชันใหม่</h2>
+      <p>เครื่องนี้ใช้เวอร์ชัน <b id="helperVer"></b> — ปิดหน้าต่าง Helper เดิม ดาวน์โหลดตัวใหม่ แตกไฟล์ แล้วเปิด <b>YoddoyHelper.bat</b></p>
       <a id="helperUpdateLink" class="btn primary small" href="#">⬇ ดาวน์โหลดเวอร์ชันใหม่</a>
     </div>
     <div id="helperMobile" hidden>
@@ -49,276 +58,302 @@
   </section>
 
   <main class="studio">
-    <!-- ซ้าย: ภาพ + แหล่งภาพ/เสียง -->
-    <div class="col">
+    <!-- ซ้าย: จอพรีวิว + สุขภาพสตรีม -->
+    <section class="stage-col" aria-label="จอพรีวิว">
       <div id="stageWrap" class="stage-wrap">
         <div class="canvas-box">
           <canvas id="canvas" width="1280" height="720"></canvas>
           <canvas id="overlay" class="overlay" aria-label="ลากเพื่อจัดตำแหน่งภาพ"></canvas>
         </div>
-        <div id="liveBadge" class="live-badge" hidden>● LIVE <span id="liveTime">00:00:00</span></div>
-        <div id="stageHint" class="stage-hint">เลือกแหล่งภาพด้านล่าง<br><span class="muted small">จอ iPhone: สะท้อนหน้าจอไปที่ PC-Mirror ก่อน แล้วเลือกหน้าต่าง UxPlay</span></div>
+        <div id="stageHint" class="stage-hint">
+          <div class="hint-icon">🎬</div>
+          <b>เริ่มจากเพิ่มแหล่งภาพ</b>
+          <span class="muted small">แท็บ “ฉาก” → จอ iPhone / กล้อง / รูป · ลากภาพบนจอนี้เพื่อจัดวาง</span>
+        </div>
       </div>
 
-      <section class="card output-card">
-        <div class="mirror-head">
-          <h2>ส่งภาพเข้า TikTok LIVE Studio <span class="tag">ไม่ต้องใช้ Stream Key</span></h2>
-          <button id="btnOutput" class="btn primary">🪟 เปิดจอสำหรับ LIVE Studio</button>
+      <div class="health">
+        <div class="stats">
+          <div><span>เฟรมเรต</span><b id="stFps">–</b></div>
+          <div><span>บิตเรตจริง</span><b id="stKbps">–</b></div>
+          <div><span>ความเร็วเข้ารหัส</span><b id="stSpeed">–</b></div>
+          <div><span>เฟรมตก</span><b id="stDrop">–</b></div>
         </div>
-        <ol class="steps small">
-          <li>กดปุ่มด้านบน → จะมีหน้าต่าง <b>Yoddoy Output</b> ที่มีแต่ภาพ (ไม่มีปุ่ม/กรอบ) — <b>อย่าย่อหน้าต่างนี้</b> (ให้วางไว้ด้านหลังหรือจอที่สองได้)</li>
-          <li>TikTok LIVE Studio → <b>เพิ่มแหล่งที่มา</b> → <b>จับภาพหน้าต่าง (Window capture)</b> → เลือก <b>Yoddoy Output</b></li>
-          <li>ถ้าติดแถบด้านบนของหน้าต่างมา: ใน LIVE Studio ลากขอบภาพเพื่อครอป หรือขยายภาพให้เกินกรอบเล็กน้อย</li>
-          <li>เสียง: ตั้งไมค์/เสียงระบบใน LIVE Studio (ภาพจากหน้าต่างไม่มีเสียงติดไปด้วย)</li>
-        </ol>
-        <p class="muted small">ตั้ง <b>แนวภาพ 9:16</b> ในการ์ด “คำนวณบิตเรต” เพื่อให้เต็มจอ TikTok · ไลฟ์ YouTube/Facebook จากปุ่ม “เริ่มไลฟ์” พร้อมกันได้</p>
-      </section>
+        <div id="destStatus" class="chips"></div>
+        <p id="advice" class="advice" hidden></p>
+        <details class="log-box">
+          <summary>บันทึกจาก FFmpeg</summary>
+          <pre id="log" class="log"></pre>
+        </details>
+      </div>
+    </section>
 
-      <section id="mirrorCard" class="card mirror-card" hidden>
-        <div class="mirror-head">
-          <h2>สะท้อนหน้าจอ iPhone <span class="tag">AirPlay</span></h2>
-          <span id="mirrorState" class="mstate off">ปิดอยู่</span>
-        </div>
-        <div class="row">
-          <button id="btnMirror" class="btn primary">▶ เริ่มสะท้อนหน้าจอ</button>
-          <button id="btnUseMirror" class="btn" data-target="srcScreen" hidden>ใช้จอ iPhone เป็นภาพไลฟ์</button>
-        </div>
-        <ol class="steps small">
-          <li>กด <b>เริ่มสะท้อนหน้าจอ</b></li>
-          <li>iPhone: <b>ศูนย์ควบคุม</b> → <b>การสะท้อนหน้าจอ</b> → <b>PC-Mirror</b></li>
-          <li>กด <b>ใช้จอ iPhone เป็นภาพไลฟ์</b> → แท็บ <b>หน้าต่าง</b> → เลือก <b>UxPlay</b></li>
-        </ol>
-      </section>
+    <!-- ขวา: แผงตั้งค่าแบบแท็บ -->
+    <aside class="panel" aria-label="ตั้งค่า">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="scene" class="active"><span>🎬</span>ฉาก</button>
+        <button role="tab" data-tab="camera"><span>✨</span>กล้อง</button>
+        <button role="tab" data-tab="audio"><span>🎙️</span>เสียง</button>
+        <button role="tab" data-tab="dest"><span>📡</span>ปลายทาง</button>
+        <button role="tab" data-tab="quality"><span>⚙️</span>คุณภาพ</button>
+        <button role="tab" data-tab="chat"><span>💬</span>แชท</button>
+      </nav>
 
-      <section class="card">
-        <h2>แหล่งภาพ &amp; จัดวาง</h2>
-        <div class="row">
-          <button id="srcScreen" class="btn">📱 จอ iPhone / หน้าต่าง / หน้าจอ</button>
-          <button id="srcCam" class="btn">🎥 เปิดกล้อง</button>
-          <label class="btn">🖼 เพิ่มรูป<input id="imgFile" type="file" accept="image/*" multiple hidden></label>
-        </div>
-        <div class="row nowrap add-row">
-          <input id="imgUrl" type="url" placeholder="หรือวางลิงก์รูป https://…png" autocomplete="off">
-          <button id="imgUrlAdd" class="btn small">+ รูปจากลิงก์</button>
-        </div>
-
-        <details id="webDetails" class="sub-box web-box">
-          <summary>🔗 แปะ URL บนจอ (แจ้งเตือนโดเนท · วิดเจ็ต · แชทรวม)</summary>
-          <p class="muted small">ใช้ลิงก์ Browser Source แบบเดียวกับ OBS เช่น Tipme, EasyDonate, Streamlabs, StreamElements, Restream Chat</p>
-          <input id="webUrl" type="url" placeholder="https://… ลิงก์วิดเจ็ต" autocomplete="off">
-          <div class="row nowrap add-row">
-            <label class="field inline">กว้าง <input id="webW" type="number" min="200" max="3840" value="800"></label>
-            <label class="field inline">สูง <input id="webH" type="number" min="150" max="2160" value="600"></label>
-          </div>
-          <div class="row wrap-tight">
-            <button class="btn small" data-websize="canvas">เท่าจอไลฟ์</button>
-            <button class="btn small" data-websize="800x600">800×600</button>
-            <button class="btn small" data-websize="400x600">แชท 400×600</button>
+      <!-- ===== ฉาก ===== -->
+      <div class="tabpanel" data-panel="scene">
+        <section id="mirrorCard" class="card mirror-card" hidden>
+          <div class="mirror-head">
+            <h2>สะท้อนหน้าจอ iPhone <span class="tag">AirPlay</span></h2>
+            <span id="mirrorState" class="mstate off">ปิดอยู่</span>
           </div>
           <div class="row">
-            <button id="webOpen" class="btn primary small">1. เปิดลิงก์</button>
-            <button id="webCapture" class="btn primary small" hidden>2. จับภาพหน้าต่างนี้</button>
+            <button id="btnMirror" class="btn primary">▶ เริ่มสะท้อนหน้าจอ</button>
+            <button id="btnUseMirror" class="btn" data-target="srcScreen" hidden>ใช้จอ iPhone เป็นภาพไลฟ์</button>
           </div>
-          <p id="webStep" class="muted small"></p>
-          <p class="muted small">ในหน้าต่างเลือกจอ ให้เลือกแท็บ <b>แท็บ Chrome</b> (ไม่มีแถบหัวหน้าต่าง) · ถ้าวิดเจ็ตมีพื้นหลังทึบ ตั้งพื้นหลังในวิดเจ็ตเป็น <b>สีเขียว</b> แล้วกด “ลบพื้นหลังสี → เขียว” · อย่าปิด/ย่อหน้าต่างลิงก์ระหว่างไลฟ์</p>
-        </details>
-        <p class="muted small hint-line">ลากภาพบนจอพรีวิวเพื่อย้าย · ลากจุดมุมขวาล่างเพื่อย่อ/ขยาย · ดับเบิลคลิกเพื่อเต็มจอ</p>
+          <ol class="steps small">
+            <li>กด <b>เริ่มสะท้อนหน้าจอ</b></li>
+            <li>iPhone: <b>ศูนย์ควบคุม</b> → <b>การสะท้อนหน้าจอ</b> → <b>PC-Mirror</b></li>
+            <li>กด <b>ใช้จอ iPhone เป็นภาพไลฟ์</b> → แท็บ <b>หน้าต่าง</b> → <b>UxPlay</b></li>
+          </ol>
+        </section>
 
-        <div id="layerPanel" class="layer-panel" hidden>
-          <div class="layer-tabs" id="layerTabs"></div>
-          <div class="row wrap-tight">
-            <button class="btn small" data-pos="fill" title="เต็มกรอบพอดี ไม่มีขอบดำ (ตัดส่วนเกินบน-ล่าง/ซ้าย-ขวา)">เต็มกรอบ</button>
-            <button class="btn small" data-pos="full" title="ย่อให้เห็นภาพครบ อาจมีขอบดำ">พอดีจอ</button>
-            <button class="btn small" data-pos="center">กลาง</button>
-            <button class="btn small" data-pos="left">ครึ่งซ้าย</button>
-            <button class="btn small" data-pos="right">ครึ่งขวา</button>
-            <button class="btn small" data-pos="tl">↖</button>
-            <button class="btn small" data-pos="tr">↗</button>
-            <button class="btn small" data-pos="bl">↙</button>
-            <button class="btn small" data-pos="br">↘</button>
+        <section class="card">
+          <h2>แหล่งภาพ</h2>
+          <div class="source-grid">
+            <button id="srcScreen" class="source-btn"><span>📱</span>จอ iPhone / หน้าต่าง</button>
+            <button id="srcCam" class="source-btn"><span>🎥</span>เปิดกล้อง</button>
+            <label class="source-btn"><span>🖼️</span>เพิ่มรูป<input id="imgFile" type="file" accept="image/*" multiple hidden></label>
+            <button class="source-btn" id="srcWeb" type="button"><span>🔗</span>แปะ URL</button>
           </div>
-          <div class="row wrap-tight">
-            <button id="lyFront" class="btn small">⬆ ไว้บนสุด</button>
-            <button id="lyBack" class="btn small">⬇ ไว้ล่างสุด</button>
-            <button id="lyHide" class="btn small">ซ่อน</button>
-            <button id="lyRemove" class="btn small danger-text">ลบ</button>
+          <div class="row nowrap add-row">
+            <input id="imgUrl" type="url" placeholder="หรือวางลิงก์รูป https://…png" autocomplete="off">
+            <button id="imgUrlAdd" class="btn small">+ รูปจากลิงก์</button>
           </div>
-          <label class="field">ความทึบ <span id="lyOpacityLabel" class="muted small">100%</span>
-            <input id="lyOpacity" type="range" min="5" max="100" value="100">
-          </label>
 
-          <div id="keyBox" class="sub-box" hidden>
-            <div class="sub-title">ลบพื้นหลังสี (Chroma key)</div>
-            <div class="row wrap-tight">
-              <button class="btn small" data-key="off">ปิด</button>
-              <button class="btn small" data-key="green">เขียว</button>
-              <button class="btn small" data-key="black">ดำ</button>
-              <button class="btn small" data-key="white">ขาว</button>
-              <button class="btn small" data-key="auto">สีจากมุมภาพ</button>
-              <input id="keyColor" type="color" value="#00ff00" title="เลือกสีเอง" class="color-in">
+          <details id="webDetails" class="sub-box web-box">
+            <summary>🔗 แปะ URL บนจอ (แจ้งเตือนโดเนท · วิดเจ็ต · แชทรวม)</summary>
+            <p class="muted small">ใช้ลิงก์ Browser Source แบบเดียวกับ OBS เช่น Tipme, EasyDonate, Streamlabs, StreamElements, Restream Chat</p>
+            <input id="webUrl" type="url" placeholder="https://… ลิงก์วิดเจ็ต" autocomplete="off">
+            <div class="row nowrap add-row">
+              <label class="field inline">กว้าง <input id="webW" type="number" min="200" max="3840" value="800"></label>
+              <label class="field inline">สูง <input id="webH" type="number" min="150" max="2160" value="600"></label>
             </div>
-            <label class="field">ความกว้างช่วงสีที่ลบ
-              <input id="keySim" type="range" min="0" max="100" value="30">
+            <div class="row wrap-tight">
+              <button class="btn small" data-websize="canvas">เท่าจอไลฟ์</button>
+              <button class="btn small" data-websize="800x600">800×600</button>
+              <button class="btn small" data-websize="400x600">แชท 400×600</button>
+            </div>
+            <div class="row">
+              <button id="webOpen" class="btn primary small">1. เปิดลิงก์</button>
+              <button id="webCapture" class="btn primary small" hidden>2. จับภาพหน้าต่างนี้</button>
+            </div>
+            <p id="webStep" class="muted small"></p>
+            <p class="muted small">เลือกแท็บ <b>แท็บ Chrome</b> ในหน้าต่างเลือกจอ · วิดเจ็ตมีพื้นหลังทึบ: ตั้งพื้นหลังเป็น <b>สีเขียว</b> แล้วใช้ “ลบพื้นหลังสี → เขียว” · อย่าปิด/ย่อหน้าต่างลิงก์ระหว่างไลฟ์</p>
+          </details>
+        </section>
+
+        <section class="card">
+          <h2>เลเยอร์ &amp; จัดวาง</h2>
+          <p class="muted small hint-line">ลากภาพบนจอพรีวิวเพื่อย้าย · ลากจุดมุมขวาล่างเพื่อย่อ/ขยาย · ดับเบิลคลิกเพื่อเต็มจอ</p>
+          <div id="layerPanel" class="layer-panel" hidden>
+            <div class="layer-tabs" id="layerTabs"></div>
+            <div class="seg">
+              <button class="btn small" data-pos="fill" title="เต็มกรอบพอดี ไม่มีขอบดำ">เต็มกรอบ</button>
+              <button class="btn small" data-pos="full" title="ย่อให้เห็นภาพครบ">พอดีจอ</button>
+              <button class="btn small" data-pos="center">กลาง</button>
+              <button class="btn small" data-pos="left">ครึ่งซ้าย</button>
+              <button class="btn small" data-pos="right">ครึ่งขวา</button>
+              <button class="btn small" data-pos="tl" title="มุมซ้ายบน">↖</button>
+              <button class="btn small" data-pos="tr" title="มุมขวาบน">↗</button>
+              <button class="btn small" data-pos="bl" title="มุมซ้ายล่าง">↙</button>
+              <button class="btn small" data-pos="br" title="มุมขวาล่าง">↘</button>
+            </div>
+            <div class="seg">
+              <button id="lyFront" class="btn small">⬆ บนสุด</button>
+              <button id="lyBack" class="btn small">⬇ ล่างสุด</button>
+              <button id="lyHide" class="btn small">ซ่อน</button>
+              <button id="lyRemove" class="btn small danger-text">ลบ</button>
+            </div>
+            <label class="field">ความทึบ <span id="lyOpacityLabel" class="muted small">100%</span>
+              <input id="lyOpacity" type="range" min="5" max="100" value="100">
+            </label>
+
+            <div id="keyBox" class="sub-box" hidden>
+              <div class="sub-title">ลบพื้นหลังสี (Chroma key)</div>
+              <div class="seg">
+                <button class="btn small" data-key="off">ปิด</button>
+                <button class="btn small" data-key="green">เขียว</button>
+                <button class="btn small" data-key="black">ดำ</button>
+                <button class="btn small" data-key="white">ขาว</button>
+                <button class="btn small" data-key="auto">สีจากมุมภาพ</button>
+                <input id="keyColor" type="color" value="#00ff00" title="เลือกสีเอง" class="color-in">
+              </div>
+              <label class="field">ความกว้างช่วงสีที่ลบ
+                <input id="keySim" type="range" min="0" max="100" value="30">
+              </label>
+            </div>
+
+            <div id="cropBox" class="sub-box">
+              <div class="sub-title">ตัดขอบภาพจอ</div>
+              <label class="field">ตัดหัวหน้าต่าง (แถบชื่อด้านบน) <span id="cropTopLabel" class="muted small"></span>
+                <input id="cropTop" type="range" min="0" max="120" value="0">
+              </label>
+              <div class="seg">
+                <button id="cropAuto" class="btn small">✂ ตัดหัวหน้าต่าง + ขอบดำอัตโนมัติ</button>
+                <button id="cropReset" class="btn small">คืนค่าเดิม</button>
+              </div>
+            </div>
+
+            <div id="shapeBox" class="sub-box" hidden>
+              <div class="sub-title">รูปทรงกล้อง</div>
+              <div class="seg">
+                <button class="btn small" data-shape="rect">สี่เหลี่ยม</button>
+                <button class="btn small" data-shape="round">มุมมน</button>
+                <button class="btn small" data-shape="circle">วงกลม</button>
+              </div>
+            </div>
+          </div>
+
+          <label class="field">ข้อความแถบล่าง
+            <input id="banner" type="text" maxlength="120" placeholder="เช่น โปรวันนี้ ลด 50% 🔥">
+          </label>
+        </section>
+
+        <section class="card output-card">
+          <h2>ส่งภาพเข้า TikTok LIVE Studio <span class="tag">ไม่ต้องใช้ Stream Key</span></h2>
+          <button id="btnOutput" class="btn primary">🪟 เปิดจอสำหรับ LIVE Studio</button>
+          <ol class="steps small">
+            <li>จะมีหน้าต่าง <b>Yoddoy Output</b> ที่มีแต่ภาพ — <b>อย่าย่อหน้าต่างนี้</b></li>
+            <li>LIVE Studio → <b>เพิ่มแหล่งที่มา</b> → <b>จับภาพหน้าต่าง</b> → <b>Yoddoy Output</b></li>
+            <li>เสียง: ตั้งไมค์ใน LIVE Studio · ตั้ง <b>แนวภาพ 9:16</b> ในแท็บ “คุณภาพ”</li>
+          </ol>
+        </section>
+      </div>
+
+      <!-- ===== กล้อง ===== -->
+      <div class="tabpanel" data-panel="camera" hidden>
+        <section class="card">
+          <h2>กล้อง</h2>
+          <label class="field">กล้องที่ใช้
+            <select id="camSelect"><option value="">ค่าเริ่มต้น</option></select>
+          </label>
+          <div class="row">
+            <label class="check small"><input id="fxMirror" type="checkbox" checked> กลับด้านเหมือนกระจก</label>
+            <label class="check small"><input id="fxCompare" type="checkbox"> ดูภาพก่อนปรับ</label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>ใบหน้า <span class="tag">AI</span></h2>
+          <label class="field">หน้าเรียว <span id="faceSlimLabel" class="muted small">0</span>
+            <input id="faceSlim" type="range" min="0" max="100" value="0">
+          </label>
+          <div class="field">สติกเกอร์ติดหน้า</div>
+          <div id="stickerChips" class="sticker-grid"></div>
+          <p id="faceStatus" class="muted small"></p>
+        </section>
+
+        <section class="card">
+          <h2>ผิว &amp; ฟิลเตอร์</h2>
+          <div id="fxPresets" class="chips fx-chips"></div>
+          <div class="grid2">
+            <label class="field">หน้าเนียน <span class="muted small" data-out="smooth"></span>
+              <input type="range" min="0" max="100" data-fx="smooth">
+            </label>
+            <label class="field">ผิวสว่าง <span class="muted small" data-out="glow"></span>
+              <input type="range" min="0" max="100" data-fx="glow">
+            </label>
+            <label class="field">ความสว่าง <span class="muted small" data-out="bright"></span>
+              <input type="range" min="-50" max="50" data-fx="bright">
+            </label>
+            <label class="field">คอนทราสต์ <span class="muted small" data-out="contrast"></span>
+              <input type="range" min="-50" max="50" data-fx="contrast">
+            </label>
+            <label class="field">ความสดของสี <span class="muted small" data-out="sat"></span>
+              <input type="range" min="-100" max="100" data-fx="sat">
+            </label>
+            <label class="field">โทนเย็น ↔ อุ่น <span class="muted small" data-out="warm"></span>
+              <input type="range" min="-100" max="100" data-fx="warm">
             </label>
           </div>
+          <button id="fxReset" class="btn small">รีเซ็ตผิว &amp; ฟิลเตอร์</button>
+        </section>
+      </div>
 
-          <div id="cropBox" class="sub-box">
-            <div class="sub-title">ตัดขอบภาพจอ</div>
-            <label class="field">ตัดหัวหน้าต่าง (แถบชื่อด้านบน) <span id="cropTopLabel" class="muted small"></span>
-              <input id="cropTop" type="range" min="0" max="120" value="0">
-            </label>
-            <div class="row wrap-tight">
-              <button id="cropAuto" class="btn small">✂ ตัดหัวหน้าต่าง + ขอบดำอัตโนมัติ</button>
-              <button id="cropReset" class="btn small">คืนค่าเดิม</button>
-            </div>
-          </div>
-
-          <div id="shapeBox" class="sub-box" hidden>
-            <div class="sub-title">รูปทรงกล้อง</div>
-            <div class="row wrap-tight">
-              <button class="btn small" data-shape="rect">สี่เหลี่ยม</button>
-              <button class="btn small" data-shape="round">มุมมน</button>
-              <button class="btn small" data-shape="circle">วงกลม</button>
-            </div>
-          </div>
-        </div>
-
-        <label class="field">ข้อความแถบล่าง
-          <input id="banner" type="text" maxlength="120" placeholder="เช่น โปรวันนี้ ลด 50% 🔥">
-        </label>
-      </section>
-
-      <section class="card">
-        <h2>กล้อง &amp; ฟิลเตอร์</h2>
-        <label class="field">กล้องที่ใช้
-          <select id="camSelect"><option value="">ค่าเริ่มต้น</option></select>
-        </label>
-        <div class="field">ฟิลเตอร์</div>
-        <div id="fxPresets" class="chips fx-chips"></div>
-        <div class="grid2">
-          <label class="field">หน้าเนียน <span class="muted small" data-out="smooth"></span>
-            <input type="range" min="0" max="100" data-fx="smooth">
-          </label>
-          <label class="field">ผิวสว่าง <span class="muted small" data-out="glow"></span>
-            <input type="range" min="0" max="100" data-fx="glow">
-          </label>
-          <label class="field">ความสว่าง <span class="muted small" data-out="bright"></span>
-            <input type="range" min="-50" max="50" data-fx="bright">
-          </label>
-          <label class="field">คอนทราสต์ <span class="muted small" data-out="contrast"></span>
-            <input type="range" min="-50" max="50" data-fx="contrast">
-          </label>
-          <label class="field">ความสดของสี <span class="muted small" data-out="sat"></span>
-            <input type="range" min="-100" max="100" data-fx="sat">
-          </label>
-          <label class="field">โทนเย็น ↔ อุ่น <span class="muted small" data-out="warm"></span>
-            <input type="range" min="-100" max="100" data-fx="warm">
-          </label>
-        </div>
-        <div class="row">
-          <label class="check small"><input id="fxMirror" type="checkbox" checked> กลับด้านเหมือนกระจก</label>
-          <label class="check small"><input id="fxCompare" type="checkbox"> ดูภาพก่อนปรับ</label>
-          <button id="fxReset" class="btn small">รีเซ็ต</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>เสียง</h2>
-        <div class="grid2">
+      <!-- ===== เสียง ===== -->
+      <div class="tabpanel" data-panel="audio" hidden>
+        <section class="card">
+          <h2>เสียง</h2>
           <label class="field">ไมโครโฟน
             <select id="micSelect"><option value="">ไม่ใช้ไมค์</option></select>
           </label>
           <label class="field">ระดับไมค์ <span id="micVolLabel" class="muted small">100%</span>
             <input id="micVol" type="range" min="0" max="200" value="100">
           </label>
-        </div>
-        <div class="meter"><div id="meterBar"></div></div>
-        <p class="muted small">เสียงจากหน้าจอ/แท็บจะรวมเข้ามาอัตโนมัติ ถ้าติ๊ก “แชร์เสียง” ตอนเลือกจอ · จอ iPhone ผ่าน AirPlay จะเล่นเสียงออกลำโพงคอม ให้เลือก “หน้าจอทั้งหมด” + แชร์เสียงระบบ ถ้าต้องการเสียงจาก iPhone</p>
-      </section>
-    </div>
+          <div class="meter"><div id="meterBar"></div></div>
+          <p class="muted small">เสียงจากหน้าจอ/แท็บรวมเข้ามาอัตโนมัติถ้าติ๊ก “แชร์เสียง” ตอนเลือกจอ · เสียงจาก iPhone (AirPlay) ออกลำโพงคอม ให้เลือก “หน้าจอทั้งหมด” + แชร์เสียงระบบ</p>
+        </section>
+      </div>
 
-    <!-- ขวา: ปลายทาง + บิตเรต + สถานะ -->
-    <div class="col">
-      <section class="card">
-        <h2>แชทสด</h2>
-        <div class="grid2">
-          <label class="field">YouTube (ลิงก์ไลฟ์ หรือ Video ID)
-            <input id="chatYoutube" type="text" placeholder="https://youtube.com/live/…" autocomplete="off">
-          </label>
-          <label class="field">Twitch (ชื่อช่อง)
-            <input id="chatTwitch" type="text" placeholder="ชื่อช่อง" autocomplete="off">
-          </label>
-        </div>
-        <div class="layer-tabs chat-tabs">
-          <button data-chat="youtube">YouTube</button>
-          <button data-chat="twitch">Twitch</button>
-          <button data-chat="facebook">Facebook</button>
-          <button data-chat="tiktok">TikTok</button>
-        </div>
-        <iframe id="chatFrame" class="chat-frame" title="แชทสด" hidden></iframe>
-        <p id="chatNote" class="muted small chat-note"></p>
-        <div class="row">
-          <button id="chatPin" class="btn small" hidden>📌 แปะแชทนี้บนจอไลฟ์</button>
-          <button id="chatFbOpen" class="btn small" hidden>เปิดคอมเมนต์ Facebook</button>
-        </div>
-        <p class="muted small">อยากรวมแชททุกช่องบนจอ: ใช้ลิงก์ Chat Overlay ของ Restream หรือ Streamlabs ใน “แปะ URL บนจอ”</p>
-      </section>
+      <!-- ===== ปลายทาง ===== -->
+      <div class="tabpanel" data-panel="dest" hidden>
+        <section class="card">
+          <h2>ปลายทางไลฟ์</h2>
+          <div id="destList" class="dest-list"></div>
+          <div class="row nowrap">
+            <select id="addPlatform" aria-label="เลือกแพลตฟอร์ม"></select>
+            <button id="btnAdd" class="btn">+ เพิ่ม</button>
+          </div>
+          <label class="check small"><input id="rememberKeys" type="checkbox"> จำ Stream Key ไว้ในเบราว์เซอร์เครื่องนี้</label>
+        </section>
+      </div>
 
-      <section class="card">
-        <h2>ปลายทางไลฟ์</h2>
-        <div id="destList" class="dest-list"></div>
-        <div class="row">
-          <select id="addPlatform" aria-label="เลือกแพลตฟอร์ม"></select>
-          <button id="btnAdd" class="btn">+ เพิ่ม</button>
-        </div>
-        <label class="check small"><input id="rememberKeys" type="checkbox"> จำ Stream Key ไว้ในเบราว์เซอร์เครื่องนี้</label>
-      </section>
+      <!-- ===== คุณภาพ ===== -->
+      <div class="tabpanel" data-panel="quality" hidden>
+        <section class="card">
+          <h2>ภาพ &amp; บิตเรต</h2>
+          <div class="grid2">
+            <label class="field">ความเร็วอัปโหลด (Mbps)
+              <div class="row nowrap">
+                <input id="upload" type="number" min="0.5" step="0.1" value="10">
+                <button id="btnSpeed" class="btn small">ทดสอบ</button>
+              </div>
+            </label>
+            <label class="field">แนวภาพ
+              <select id="orient">
+                <option value="h">แนวนอน 16:9 (YouTube, Facebook)</option>
+                <option value="v">แนวตั้ง 9:16 (TikTok, Reels)</option>
+              </select>
+            </label>
+          </div>
+          <div id="calc" class="calc"></div>
+          <label class="check small"><input id="manual" type="checkbox"> ตั้งค่าเอง</label>
+          <div id="manualBox" class="grid2" hidden>
+            <label class="field">ความละเอียด
+              <select id="res">
+                <option value="1080">1080p</option><option value="720">720p</option><option value="540">540p</option><option value="360">360p</option>
+              </select>
+            </label>
+            <label class="field">เฟรมเรต
+              <select id="fps"><option>30</option><option>60</option><option>25</option></select>
+            </label>
+            <label class="field">วิดีโอ (kbps)
+              <input id="vkbps" type="number" min="300" max="20000" step="100" value="4500">
+            </label>
+            <label class="field">เสียง (kbps)
+              <select id="akbps"><option>160</option><option>128</option><option>192</option><option>96</option></select>
+            </label>
+          </div>
+          <label class="field">ตัวเข้ารหัส
+            <select id="encoder"><option value="">กำลังตรวจ…</option></select>
+          </label>
+        </section>
 
-      <section class="card">
-        <h2>คำนวณบิตเรต</h2>
-        <div class="grid2">
-          <label class="field">ความเร็วอัปโหลด (Mbps)
-            <div class="row nowrap">
-              <input id="upload" type="number" min="0.5" step="0.1" value="10">
-              <button id="btnSpeed" class="btn small">ทดสอบ</button>
-            </div>
-          </label>
-          <label class="field">แนวภาพ
-            <select id="orient">
-              <option value="h">แนวนอน 16:9 (YouTube, Facebook, Twitch)</option>
-              <option value="v">แนวตั้ง 9:16 (TikTok, Reels, จอ iPhone)</option>
-            </select>
-          </label>
-        </div>
-        <div id="calc" class="calc"></div>
-        <label class="check small"><input id="manual" type="checkbox"> ตั้งค่าเอง</label>
-        <div id="manualBox" class="grid2" hidden>
-          <label class="field">ความละเอียด
-            <select id="res">
-              <option value="1080">1080p</option><option value="720">720p</option><option value="540">540p</option><option value="360">360p</option>
-            </select>
-          </label>
-          <label class="field">เฟรมเรต
-            <select id="fps"><option>30</option><option>60</option><option>25</option></select>
-          </label>
-          <label class="field">วิดีโอ (kbps)
-            <input id="vkbps" type="number" min="300" max="20000" step="100" value="4500">
-          </label>
-          <label class="field">เสียง (kbps)
-            <select id="akbps"><option>160</option><option>128</option><option>192</option><option>96</option></select>
-          </label>
-        </div>
-        <label class="field">ตัวเข้ารหัส
-          <select id="encoder"><option value="">กำลังตรวจ…</option></select>
-        </label>
-      </section>
-
-      <section class="card">
-        <h2>ดีเลย์</h2>
-        <div class="grid2">
+        <section class="card">
+          <h2>ดีเลย์</h2>
           <label class="field">โหมดดีเลย์
             <select id="latency">
-              <option value="low">ต่ำสุด — ตอบแชทไว (เหมาะกับไลฟ์พูดคุย/ขายของ)</option>
+              <option value="low">ต่ำสุด — ตอบแชทไว</option>
               <option value="normal" selected>สมดุล — แนะนำ</option>
               <option value="stable">เสถียร — ภาพคมสุด ทนเน็ตแกว่ง</option>
             </select>
@@ -326,33 +361,42 @@
           <label class="field">หน่วงเวลาเพิ่ม (วินาที) <span id="delayLabel" class="muted small"></span>
             <input id="delaySec" type="number" min="0" max="300" step="5" value="0">
           </label>
-        </div>
-        <div id="latencyInfo" class="calc small"></div>
-      </section>
+          <div id="latencyInfo" class="calc small"></div>
+        </section>
+      </div>
 
-      <button id="btnLive" class="btn primary big">เริ่มไลฟ์</button>
-
-      <section class="card">
-        <h2>สุขภาพสตรีม</h2>
-        <div class="stats">
-          <div><span class="muted small">เฟรมเรต</span><b id="stFps">–</b></div>
-          <div><span class="muted small">บิตเรตจริง</span><b id="stKbps">–</b></div>
-          <div><span class="muted small">ความเร็วเข้ารหัส</span><b id="stSpeed">–</b></div>
-          <div><span class="muted small">เฟรมตก</span><b id="stDrop">–</b></div>
-        </div>
-        <div id="destStatus" class="chips"></div>
-        <p id="advice" class="advice" hidden></p>
-        <details>
-          <summary class="small">บันทึกจาก FFmpeg</summary>
-          <pre id="log" class="log"></pre>
-        </details>
-      </section>
-    </div>
+      <!-- ===== แชท ===== -->
+      <div class="tabpanel" data-panel="chat" hidden>
+        <section class="card">
+          <h2>แชทสด</h2>
+          <label class="field">YouTube (ลิงก์ไลฟ์ หรือ Video ID)
+            <input id="chatYoutube" type="text" placeholder="https://youtube.com/live/…" autocomplete="off">
+          </label>
+          <label class="field">Twitch (ชื่อช่อง)
+            <input id="chatTwitch" type="text" placeholder="ชื่อช่อง" autocomplete="off">
+          </label>
+          <div class="layer-tabs chat-tabs">
+            <button data-chat="youtube">YouTube</button>
+            <button data-chat="twitch">Twitch</button>
+            <button data-chat="facebook">Facebook</button>
+            <button data-chat="tiktok">TikTok</button>
+          </div>
+          <iframe id="chatFrame" class="chat-frame" title="แชทสด" hidden></iframe>
+          <p id="chatNote" class="muted small chat-note"></p>
+          <div class="row">
+            <button id="chatPin" class="btn small" hidden>📌 แปะแชทนี้บนจอไลฟ์</button>
+            <button id="chatFbOpen" class="btn small" hidden>เปิดคอมเมนต์ Facebook</button>
+          </div>
+          <p class="muted small">รวมแชททุกช่องบนจอ: ใช้ลิงก์ Chat Overlay ของ Restream หรือ Streamlabs ใน “แปะ URL”</p>
+        </section>
+      </div>
+    </aside>
   </main>
 
   <div id="toast" class="toast" hidden></div>
   <script src="helper.js"></script>
   <script src="beauty.js"></script>
+  <script src="face.js"></script>
   <script src="studio.js"></script>
   <script src="mirror-control.js"></script>
 </body>

@@ -86,6 +86,17 @@ class CameraFX {
     const fs = `precision mediump float;
       varying vec2 uv; uniform sampler2D tex; uniform vec2 px;
       uniform float smoothAmt, glow, bright, contrast, sat, warm, sepia, vignette;
+      // หน้าเรียว: ดันแก้ม/กราม 2 จุด (c → m) แบบ local translation warp ภายในรัศมี wr
+      uniform float warpOn, wr, aspect; uniform vec2 c1, m1, c2, m2;
+      vec2 warp(vec2 t, vec2 c, vec2 m){
+        vec2 A = vec2(aspect, 1.);
+        vec2 pc = (t - c) * A;
+        float d2 = dot(pc, pc), R2 = wr * wr;
+        if (d2 >= R2) return t;
+        vec2 mc = (m - c) * A;
+        float k = (R2 - d2) / (R2 - d2 + dot(mc, mc));
+        return t - k * k * (m - c);
+      }
       float skin(vec3 c){
         float y = dot(c, vec3(.299,.587,.114));
         float cb = (c.b - y) * .564 + .5;
@@ -93,7 +104,9 @@ class CameraFX {
         return smoothstep(.27,.32,cb) * (1. - smoothstep(.49,.54,cb)) * smoothstep(.50,.54,cr) * (1. - smoothstep(.67,.72,cr));
       }
       void main(){
-        vec3 c = texture2D(tex, uv).rgb;
+        vec2 t = uv;
+        if (warpOn > .5) { t = warp(t, c1, m1); t = warp(t, c2, m2); }
+        vec3 c = texture2D(tex, t).rgb;
         float m = skin(c);
         if (smoothAmt > 0.01) {
           vec3 sum = vec3(0.); float ws = 0.;
@@ -101,7 +114,7 @@ class CameraFX {
           float colorK = mix(80., 8., smoothAmt); // ยิ่งปรับมาก ยิ่งยอมเบลอรอยที่สีต่างมากขึ้น
           for (int i = -4; i <= 4; i++) for (int j = -4; j <= 4; j++) {
             vec2 o = vec2(float(i), float(j));
-            vec3 s = texture2D(tex, uv + o * px * spread).rgb;
+            vec3 s = texture2D(tex, t + o * px * spread).rgb;
             vec3 d = s - c;
             float w = exp(-dot(o,o) / 18. - dot(d,d) * colorK);
             sum += s * w; ws += w;
@@ -146,7 +159,13 @@ class CameraFX {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.u = {};
-    for (const n of ['px', 'mirror', 'smoothAmt', 'glow', 'bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['px', 'mirror', 'smoothAmt', 'glow', 'bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette', 'warpOn', 'wr', 'aspect', 'c1', 'm1', 'c2', 'm2']) this.u[n] = gl.getUniformLocation(prog, n);
+    this.warp = null;
+  }
+
+  // ตั้งค่าหน้าเรียวของเฟรมนี้ (จาก slimWarp() ใน face.js) หรือ null = ปิด
+  setWarp(w) {
+    this.warp = w;
   }
 
   // คืน canvas ที่ประมวลผลแล้ว (ย่อไม่เกิน 1280 กว้าง เพื่อให้ลื่น)
@@ -170,6 +189,16 @@ class CameraFX {
     gl.uniform1f(this.u.smoothAmt, p.smooth);
     gl.uniform1f(this.u.glow, p.glow);
     for (const k of ['bright', 'contrast', 'sat', 'warm', 'sepia', 'vignette']) gl.uniform1f(this.u[k], p[k]);
+    const wp = this.warp;
+    gl.uniform1f(this.u.warpOn, wp ? 1 : 0);
+    if (wp) {
+      gl.uniform1f(this.u.wr, wp.radius);
+      gl.uniform1f(this.u.aspect, wp.aspect);
+      gl.uniform2f(this.u.c1, wp.c1.x, wp.c1.y);
+      gl.uniform2f(this.u.m1, wp.m1.x, wp.m1.y);
+      gl.uniform2f(this.u.c2, wp.c2.x, wp.c2.y);
+      gl.uniform2f(this.u.m2, wp.m2.x, wp.m2.y);
+    }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     return this.canvas;
   }
