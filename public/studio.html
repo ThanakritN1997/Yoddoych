@@ -30,6 +30,9 @@
     <button id="btnLive" class="btn live-cta">เริ่มไลฟ์</button>
   </header>
 
+  <!-- แจ้งเตือนสถานะไลฟ์ (หลุด/กลับมา) -->
+  <div id="alertStack" class="alert-stack" aria-live="assertive"></div>
+
   <div id="browserWarn" class="banner banner-danger" hidden>
     ⚠️ เบราว์เซอร์นี้จับภาพจอ/กล้อง/ไมค์ไม่ได้ — เปิด <b>https://yoddoych.vercel.app/studio.html</b> ใน <b>Chrome</b> หรือ <b>Edge</b>
     <button id="btnCopyUrl" class="btn small">คัดลอกลิงก์</button>
@@ -80,6 +83,7 @@
           <div><span>เฟรมตก</span><b id="stDrop">–</b></div>
         </div>
         <div id="destStatus" class="chips"></div>
+        <div id="viewerStats" class="chips viewer-chips"></div>
         <p id="advice" class="advice" hidden></p>
         <details class="log-box">
           <summary>บันทึกจาก FFmpeg</summary>
@@ -211,6 +215,13 @@
                 <button class="btn small" data-shape="round">มุมมน</button>
                 <button class="btn small" data-shape="circle">วงกลม</button>
               </div>
+              <div class="sub-title" style="margin-top:8px">สัดส่วนกล้อง</div>
+              <div class="seg">
+                <button class="btn small" data-camaspect="1.7778">แนวนอน 16:9</button>
+                <button class="btn small" data-camaspect="0.5625">แนวตั้ง 9:16</button>
+                <button class="btn small" data-camaspect="1.3333">4:3</button>
+                <button class="btn small" data-camaspect="1">1:1</button>
+              </div>
             </div>
           </div>
 
@@ -219,6 +230,31 @@
           </label>
         </section>
 
+        <section class="card">
+          <h2>ชื่อขึ้นจอ <span class="tag">ขอบคุณคนดู</span></h2>
+          <div class="row nowrap add-row">
+            <input id="shoutName" type="text" maxlength="40" placeholder="ชื่อคนดู เช่น Yoddoy_Fan" autocomplete="off">
+            <select id="shoutType" aria-label="ประเภท">
+              <option value="follow">กดติดตาม</option>
+              <option value="gift">ส่งของขวัญ</option>
+              <option value="share">แชร์ไลฟ์</option>
+              <option value="member">สมัครสมาชิก</option>
+              <option value="donate">โดเนท</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="shoutGo" class="btn primary small">✨ ขึ้นจอ</button>
+            <span class="muted small">กด Enter ในช่องชื่อได้ · ขึ้นจอ 6 วินาที</span>
+          </div>
+          <details class="sub-box web-box">
+            <summary>แจ้งเตือนคนกดติดตาม/ของขวัญแบบอัตโนมัติ</summary>
+            <p class="muted small">แพลตฟอร์มไม่ส่งรายชื่อคนกดติดตามให้เว็บทั่วไปแบบสด ๆ — ใช้ลิงก์ <b>Alert Box</b> ของบริการเหล่านี้ใน “แปะ URL” (ตั้งพื้นหลังเป็นสีเขียว แล้วลบพื้นหลังสี):</p>
+            <ul class="hint small">
+              <li><b>YouTube / Facebook / Twitch:</b> Streamlabs หรือ StreamElements → Alert Box → คัดลอก Widget URL</li>
+              <li><b>TikTok:</b> TikFinity (บริการภายนอก) → Overlay → คัดลอกลิงก์ Alert</li>
+            </ul>
+          </details>
+        </section>
         <section class="card output-card">
           <h2>ส่งภาพเข้า TikTok LIVE Studio <span class="tag">ไม่ต้องใช้ Stream Key</span></h2>
           <button id="btnOutput" class="btn primary">🪟 เปิดจอสำหรับ LIVE Studio</button>
@@ -398,6 +434,15 @@
 
       <!-- ===== แชท ===== -->
       <div class="tabpanel" data-panel="chat" hidden>
+        <section class="card">
+          <h2>ยอดคนดู</h2>
+          <p class="muted small">YouTube: ใช้ลิงก์ไลฟ์ด้านล่าง + <b>YouTube API Key</b> (สร้างฟรีที่ Google Cloud Console → เปิด YouTube Data API v3 → Credentials → API key) · TikTok/Facebook ไม่เปิดให้ดึงยอดคนดู — ดูในแอปของแพลตฟอร์ม</p>
+          <label class="field">YouTube API Key
+            <input id="ytApiKey" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="check small"><input id="viewerOnScreen" type="checkbox"> แสดงยอดคนดูบนจอไลฟ์</label>
+          <p id="viewerStatus" class="muted small face-status"></p>
+        </section>
         <section class="card">
           <h2>แชทสด</h2>
           <label class="field">YouTube (ลิงก์ไลฟ์ หรือ Video ID)

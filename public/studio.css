@@ -83,6 +83,25 @@ body.studio-page {
 .live-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 
+/* ---------- แจ้งเตือนไลฟ์หลุด/กลับมา ---------- */
+.alert-stack { position: sticky; top: 57px; z-index: 19; display: flex; flex-direction: column; gap: 6px; margin: 0 18px; }
+.alert-stack:empty { display: none; }
+.live-alert {
+  display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-top: 8px;
+  padding: 10px 14px; border-radius: 12px; font-size: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); animation: slideIn .25s ease-out;
+}
+.live-alert div { display: flex; flex-direction: column; }
+.live-alert span { font-size: 12.5px; opacity: .9; }
+.live-alert.danger { background: #3a0f18; border: 1px solid #ff4d5e; color: #ffd4da; animation: slideIn .25s ease-out, alertPulse 1.6s ease-in-out infinite; }
+.live-alert.ok { background: #0d2e22; border: 1px solid #34d399; color: #c9f7e4; }
+.live-alert .icon-btn { color: inherit; }
+@keyframes slideIn { from { transform: translateY(-8px); opacity: 0; } }
+@keyframes alertPulse { 50% { box-shadow: 0 0 0 4px rgba(255, 77, 94, .25), 0 10px 30px rgba(0, 0, 0, .45); } }
+.viewer-chips { margin-top: 6px; }
+.chip.viewer { border-color: rgba(255, 59, 92, .5); color: #ffb3c0; }
+.hint { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+#shoutType { width: auto; flex: none; }
+
 /* ---------- แบนเนอร์ ---------- */
 .banner { margin: 12px 18px 0; padding: 12px 16px; border-radius: var(--radius); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; }
 .banner-danger { background: rgba(255, 77, 94, .1); border: 1px solid rgba(255, 77, 94, .5); }

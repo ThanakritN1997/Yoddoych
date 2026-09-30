@@ -235,7 +235,7 @@ function contentAspect(l) {
   if (l.kind === 'image') return l.img.naturalWidth / Math.max(1, l.img.naturalHeight);
   const v = l.video;
   if (!v.videoWidth) return 16 / 9;
-  if (l.kind === 'cam') return l.shape === 'circle' ? 1 : v.videoWidth / v.videoHeight;
+  if (l.kind === 'cam') return l.shape === 'circle' ? 1 : l.camAspect || v.videoWidth / v.videoHeight;
   const c = l.crop;
   return Math.max(1, v.videoWidth - c.l - c.r) / Math.max(1, v.videoHeight - c.t - c.b);
 }
@@ -399,10 +399,114 @@ function draw() {
     ctx2d.textBaseline = 'middle';
     ctx2d.fillText(text, Math.round(W * 0.03), H - bh / 2, W * 0.94);
   }
+  drawViewerBadge(W, H);
+  drawShoutout(W, H);
   $('stageHint').hidden = layers.some(hasContent);
   drawOverlay();
 }
 const bannerText = () => $('banner').value.trim();
+const UI_FONT = '"Noto Sans Thai", "Sarabun", system-ui, sans-serif';
+
+// ---------- ชื่อขึ้นจอ (ป้ายขอบคุณคนดู) ----------
+const SHOUT_TYPES = {
+  follow: { emoji: '💖', text: (n) => `ขอบคุณ ${n} ที่กดติดตาม!`, c1: '#7c5cff', c2: '#ff4d8d' },
+  gift: { emoji: '🎁', text: (n) => `${n} ส่งของขวัญ ขอบคุณมาก!`, c1: '#f59e0b', c2: '#ef4444' },
+  share: { emoji: '🔁', text: (n) => `ขอบคุณ ${n} ที่แชร์ไลฟ์!`, c1: '#06b6d4', c2: '#3b82f6' },
+  member: { emoji: '⭐', text: (n) => `ยินดีต้อนรับสมาชิกใหม่ ${n}!`, c1: '#eab308', c2: '#a855f7' },
+  donate: { emoji: '💸', text: (n) => `ขอบคุณ ${n} สำหรับโดเนท!`, c1: '#22c55e', c2: '#14b8a6' },
+};
+const shoutQueue = [];
+let shoutNow = null;
+const SHOUT_MS = 6000;
+function queueShout(name, type) {
+  shoutQueue.push({ name, type });
+  if (!shoutNow) nextShout();
+}
+function nextShout() {
+  const s = shoutQueue.shift();
+  shoutNow = s ? { ...s, start: performance.now() } : null;
+}
+function drawShoutout(W, H) {
+  if (!shoutNow) return;
+  const t = performance.now() - shoutNow.start;
+  if (t > SHOUT_MS) return nextShout();
+  const st = SHOUT_TYPES[shoutNow.type] || SHOUT_TYPES.follow;
+  const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+  const inK = ease(t / 450); // เลื่อนลงจากบน
+  const outK = ease((t - (SHOUT_MS - 450)) / 450); // เลื่อนขึ้นออก
+  const k = inK - outK;
+  const S = Math.min(W, H);
+  const fs = Math.round(S * 0.05);
+  ctx2d.save();
+  ctx2d.font = `800 ${fs}px ${UI_FONT}`;
+  const label = `${st.emoji}  ${st.text(shoutNow.name)}`;
+  const tw = Math.min(W * 0.9, ctx2d.measureText(label).width + fs * 1.6);
+  const bh = fs * 2;
+  const x = (W - tw) / 2;
+  const y = S * 0.05 - (1 - k) * (bh + S * 0.08);
+  const pop = 1 + 0.06 * Math.sin(Math.min(1, t / 600) * Math.PI); // เด้งตอนเข้า
+  ctx2d.globalAlpha = Math.max(0, Math.min(1, k * 1.2));
+  ctx2d.translate(W / 2, y + bh / 2);
+  ctx2d.scale(pop, pop);
+  ctx2d.translate(-W / 2, -(y + bh / 2));
+  const g = ctx2d.createLinearGradient(x, 0, x + tw, 0);
+  g.addColorStop(0, st.c1);
+  g.addColorStop(1, st.c2);
+  ctx2d.shadowColor = 'rgba(0,0,0,.45)';
+  ctx2d.shadowBlur = fs * 0.8;
+  ctx2d.fillStyle = g;
+  ctx2d.beginPath();
+  ctx2d.roundRect(x, y, tw, bh, bh / 2);
+  ctx2d.fill();
+  // ประกายวิ่งผ่าน
+  ctx2d.shadowBlur = 0;
+  ctx2d.save();
+  ctx2d.clip();
+  const sx = x - tw * 0.3 + ((t % 1600) / 1600) * tw * 1.6;
+  const sg = ctx2d.createLinearGradient(sx - fs * 2, 0, sx + fs * 2, 0);
+  sg.addColorStop(0, 'rgba(255,255,255,0)');
+  sg.addColorStop(0.5, 'rgba(255,255,255,.35)');
+  sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx2d.fillStyle = sg;
+  ctx2d.fillRect(x, y, tw, bh);
+  ctx2d.restore();
+  ctx2d.fillStyle = '#fff';
+  ctx2d.textAlign = 'center';
+  ctx2d.textBaseline = 'middle';
+  ctx2d.fillText(label, W / 2, y + bh / 2 + fs * 0.04, tw - fs);
+  ctx2d.restore();
+}
+
+// ---------- ยอดคนดูบนจอ ----------
+const viewerData = {}; // { youtube: { viewers, likes, at } }
+function drawViewerBadge(W, H) {
+  if (!$('viewerOnScreen').checked) return;
+  const total = Object.values(viewerData).reduce((s, d) => s + (d.viewers || 0), 0);
+  if (!Object.keys(viewerData).length) return;
+  const S = Math.min(W, H);
+  const fs = Math.round(S * 0.032);
+  const m = S * 0.03;
+  ctx2d.save();
+  ctx2d.font = `700 ${fs}px ${UI_FONT}`;
+  const label = `👁 ${total.toLocaleString()}`;
+  const tw = ctx2d.measureText(label).width + fs * 3.6;
+  const bh = fs * 1.7;
+  ctx2d.fillStyle = 'rgba(0,0,0,.55)';
+  ctx2d.beginPath();
+  ctx2d.roundRect(m, m, tw, bh, bh / 2);
+  ctx2d.fill();
+  ctx2d.fillStyle = '#ff3b5c';
+  ctx2d.beginPath();
+  ctx2d.roundRect(m + fs * 0.3, m + fs * 0.3, fs * 2.3, bh - fs * 0.6, (bh - fs * 0.6) / 2);
+  ctx2d.fill();
+  ctx2d.fillStyle = '#fff';
+  ctx2d.textBaseline = 'middle';
+  ctx2d.font = `800 ${Math.round(fs * 0.7)}px ${UI_FONT}`;
+  ctx2d.fillText('LIVE', m + fs * 0.62, m + bh / 2);
+  ctx2d.font = `700 ${fs}px ${UI_FONT}`;
+  ctx2d.fillText(label, m + fs * 2.95, m + bh / 2);
+  ctx2d.restore();
+}
 
 function resizeCanvas(w, h) {
   if (canvas.width === w && canvas.height === h) return;
@@ -571,6 +675,7 @@ function renderLayerPanel() {
   $('lyOpacityLabel').textContent = $('lyOpacity').value + '%';
   document.querySelectorAll('[data-shape]').forEach((b) => b.classList.toggle('primary', b.dataset.shape === selected.shape));
   document.querySelectorAll('[data-frame]').forEach((b) => b.classList.toggle('primary', b.dataset.frame === (selected.frame || 'none')));
+  document.querySelectorAll('[data-camaspect]').forEach((b) => b.classList.toggle('primary', selected.shape !== 'circle' && Math.abs(+b.dataset.camaspect - (selected.camAspect || 0)) < 0.01));
   if (selected.kind === 'web') {
     const k = selected.key || {};
     document.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('primary', (b.dataset.key === 'off' && !k.color) || b.dataset.key === k.mode));
@@ -636,6 +741,29 @@ document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => {
   selected.pa = selected.shape === 'circle' ? 1 : selected.preset === 'full' ? canvas.width / canvas.height : contentAspect(selected);
   selected.w = keepW;
   clampLayer(selected);
+  renderLayerPanel();
+  saveLayout();
+}));
+// สัดส่วนกล้อง: แนวนอน/แนวตั้ง/4:3/1:1 — คงความสูงกรอบเดิม ภาพกล้องครอปแบบ cover ให้เต็มกรอบ
+document.querySelectorAll('[data-camaspect]').forEach((b) => (b.onclick = () => {
+  const l = selected;
+  if (!l || l.kind !== 'cam') return;
+  const r = +b.dataset.camaspect;
+  const h = layerH(l);
+  l.camAspect = r;
+  if (l.shape === 'circle') l.shape = 'round';
+  if (l.preset && l.preset !== 'full' && l.preset !== 'fill') {
+    applyPreset(l, l.preset);
+  } else {
+    const cy = l.y + h / 2;
+    const cx = l.x + l.w / 2;
+    l.pa = r;
+    l.w = Math.min(1, (h * canvas.height * r) / canvas.width);
+    l.x = cx - l.w / 2;
+    l.y = cy - layerH(l) / 2;
+    l.preset = null;
+    clampLayer(l);
+  }
   renderLayerPanel();
   saveLayout();
 }));
@@ -726,14 +854,14 @@ $('cropReset').onclick = () => { if (selected) { setCrop(selected, { t: 0, b: 0,
 
 // ---------- จำการจัดวาง ----------
 function saveLayout() {
-  store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity, frame: l.frame })));
+  store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity, frame: l.frame, camAspect: l.camAspect })));
   saveImagesSoon();
 }
 const savedLayout = store.get('layout', []);
 function restoreLayout(l) {
   const s = savedLayout.find((x) => x.kind === l.kind);
   if (!s) return false;
-  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape, opacity: s.opacity ?? 1, frame: s.frame || 'none' });
+  Object.assign(l, { x: s.x, y: s.y, w: s.w, pa: s.pa, preset: s.preset, shape: s.shape || l.shape, opacity: s.opacity ?? 1, frame: s.frame || 'none', camAspect: s.camAspect || null });
   if (l.preset) applyPreset(l, l.preset);
   return true;
 }
@@ -1528,6 +1656,7 @@ function handle(m) {
       $('stSpeed').textContent = m.speed.toFixed(2) + 'x';
       $('stDrop').textContent = m.drop;
       renderChips(m.dests);
+      watchDests(m.dests);
       advise(m);
       break;
     }
@@ -1540,10 +1669,120 @@ function handle(m) {
       stopRecorder();
       break;
     case 'stopped':
+      // หยุดเองไม่ต้องเตือน · หยุดเพราะปัญหา (ตัวเข้ารหัสดับ ฯลฯ) = เตือนแรง
+      if (recorder && !userStopping) liveAlert('danger', '⛔ ไลฟ์หยุดทั้งหมด', m.reason || 'ตัวส่งไลฟ์หยุดทำงาน — กดเริ่มไลฟ์ใหม่', 'all');
       stopRecorder(m.reason);
       break;
   }
 }
+
+// ---------- แจ้งเตือนเมื่อช่องทางไหนไลฟ์หลุด ----------
+let userStopping = false;
+const destPrev = {}; // name → { state, downAt }
+function watchDests(list) {
+  for (const d of list || []) {
+    const p = destPrev[d.name] || { state: 'connecting' };
+    const down = d.state === 'error' || d.state === 'reconnecting' || d.state === 'failed';
+    if (p.state === 'live' && down) {
+      destPrev[d.name] = { state: d.state, downAt: Date.now() };
+      liveAlert('danger', `🔴 ${d.name} ไลฟ์หลุด`, 'กำลังต่อใหม่อัตโนมัติ… ถ้าหลุดนาน ให้เช็กเน็ตหรือ Stream Key', d.name);
+      continue;
+    }
+    if (d.state === 'live' && p.state !== 'live') {
+      if (p.downAt) {
+        const sec = Math.round((Date.now() - p.downAt) / 1000);
+        liveAlert('ok', `🟢 ${d.name} กลับมาออนไลน์แล้ว`, `หลุดไป ${sec} วินาที`, d.name);
+      }
+      destPrev[d.name] = { state: 'live' };
+      continue;
+    }
+    destPrev[d.name] = { ...p, state: d.state };
+  }
+}
+
+// แถบแจ้งเตือนใต้แถบบน + เสียง + แจ้งเตือนของ Windows (ถ้าอนุญาต)
+function liveAlert(kind, title, detail, key) {
+  const stack = $('alertStack');
+  // แจ้งเตือนเดิมของช่องเดียวกันถูกแทนที่ (เช่น "หลุด" → "กลับมาแล้ว")
+  stack.querySelectorAll(`[data-key="${CSS.escape(key)}"]`).forEach((el) => el.remove());
+  const el = document.createElement('div');
+  el.className = 'live-alert ' + kind;
+  el.dataset.key = key;
+  el.innerHTML = `<div><b>${esc(title)}</b><span>${esc(detail)}</span></div><button class="icon-btn" aria-label="ปิด">✕</button>`;
+  el.querySelector('button').onclick = () => el.remove();
+  stack.append(el);
+  if (kind === 'ok') setTimeout(() => el.remove(), 8000);
+  appendLog(`${title} — ${detail}`);
+  beep(kind === 'ok' ? [880, 1320] : [660, 440, 660]);
+  try {
+    if ('Notification' in window && Notification.permission === 'granted' && (document.hidden || kind !== 'ok')) {
+      new Notification(title, { body: detail, tag: 'yoddoy-' + key, icon: document.querySelector('link[rel=icon]')?.href });
+    }
+  } catch {}
+}
+function beep(freqs) {
+  try {
+    const t0 = actx.currentTime;
+    freqs.forEach((f, i) => {
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + i * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.18 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.18 + 0.16);
+      o.connect(g).connect(actx.destination); // ออกลำโพงเท่านั้น ไม่เข้าเสียงไลฟ์
+      o.start(t0 + i * 0.18);
+      o.stop(t0 + i * 0.18 + 0.18);
+    });
+  } catch {}
+}
+
+// ---------- ยอดคนดู YouTube (YouTube Data API v3) ----------
+$('ytApiKey').value = store.get('ytApiKey', '');
+$('viewerOnScreen').checked = store.get('viewerOnScreen', false);
+$('ytApiKey').onchange = () => { store.set('ytApiKey', $('ytApiKey').value.trim()); pollViewers(); };
+$('viewerOnScreen').onchange = () => store.set('viewerOnScreen', $('viewerOnScreen').checked);
+async function pollViewers() {
+  const key = $('ytApiKey').value.trim();
+  const id = youtubeId($('chatYoutube').value);
+  if (!key || !id) {
+    delete viewerData.youtube;
+    $('viewerStatus').textContent = key ? 'ใส่ลิงก์ไลฟ์ YouTube ในช่องด้านล่าง' : '';
+    return renderViewers();
+  }
+  try {
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails,statistics&id=${id}&key=${encodeURIComponent(key)}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    const it = j.items && j.items[0];
+    if (!it) throw new Error('ไม่พบวิดีโอนี้');
+    const live = it.liveStreamingDetails || {};
+    viewerData.youtube = { viewers: +(live.concurrentViewers || 0), likes: +(it.statistics?.likeCount || 0), live: !!live.concurrentViewers, at: Date.now() };
+    $('viewerStatus').textContent = live.concurrentViewers ? `อัปเดต ${new Date().toLocaleTimeString('th-TH')}` : 'ไลฟ์นี้ยังไม่ออนแอร์ หรือจบแล้ว';
+  } catch (e) {
+    delete viewerData.youtube;
+    $('viewerStatus').textContent = '⚠️ ดึงยอดคนดูไม่ได้: ' + e.message;
+  }
+  renderViewers();
+}
+function renderViewers() {
+  const y = viewerData.youtube;
+  $('viewerStats').innerHTML = y ? `<span class="chip viewer">YouTube · 👁 ${y.viewers.toLocaleString()} คนดู · ❤ ${y.likes.toLocaleString()}</span>` : '';
+}
+$('chatYoutube').addEventListener('change', pollViewers);
+setInterval(pollViewers, 30000); // โควตาฟรี 10,000/วัน · ครั้งละ 1 หน่วย
+pollViewers();
+
+// ---------- ป้ายชื่อขึ้นจอ ----------
+function sendShout() {
+  const name = $('shoutName').value.trim();
+  if (!name) return $('shoutName').focus();
+  queueShout(name, $('shoutType').value);
+  $('shoutName').value = '';
+  $('shoutName').focus();
+}
+$('shoutGo').onclick = sendShout;
+$('shoutName').addEventListener('keydown', (e) => e.key === 'Enter' && sendShout());
 
 function appendLog(line) {
   const log = $('log');
@@ -1615,6 +1854,11 @@ async function startLive() {
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return toast('ยังไม่ได้เชื่อมต่อ Yoddoy Helper');
   await actx.resume();
+  // ขอสิทธิ์แจ้งเตือนของ Windows ไว้เตือนตอนไลฟ์หลุด (ถามครั้งเดียว)
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+  userStopping = false;
+  for (const k of Object.keys(destPrev)) delete destPrev[k];
+  $('alertStack').innerHTML = '';
 
   ticker.postMessage(plan.fps);
   const video = canvas.captureStream(plan.fps).getVideoTracks()[0];
@@ -1656,8 +1900,10 @@ async function startLive() {
 }
 
 function stopLive() {
+  userStopping = true;
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
   stopRecorder('หยุดไลฟ์แล้ว');
+  $('alertStack').innerHTML = '';
 }
 
 function stopRecorder(reason) {
