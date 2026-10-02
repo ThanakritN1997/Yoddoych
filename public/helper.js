@@ -2,7 +2,7 @@
 // - เปิดเว็บจากเครื่องที่รันเซิร์ฟเวอร์เอง (localhost) → ใช้ที่เดียวกัน
 // - เปิดจากเว็บออนไลน์ (เช่น Vercel) → ลองต่อ Helper ที่ 127.0.0.1:47800
 window.HELPER_PORT = 47800;
-window.HELPER_MIN_VERSION = '1.4.0'; // 1.1 แก้ไลฟ์หลุด · 1.2 ดีเลย์ · 1.4 ข้อมูลช่วงเริ่มไลฟ์สม่ำเสมอขึ้น
+window.HELPER_MIN_VERSION = '1.5.0'; // 1.1 แก้ไลฟ์หลุด · 1.2 ดีเลย์ · 1.4 ข้อมูลช่วงเริ่มไลฟ์สม่ำเสมอขึ้น · 1.5 อัดไฟล์ MP4
 window.versionLess = (a, b) => {
   const pa = String(a || '0').split('.').map(Number);
   const pb = String(b).split('.').map(Number);

@@ -222,6 +222,8 @@ const LAYER_NAMES = { screen: 'จอ iPhone / หน้าต่าง', cam: '
 function newLayer(kind, name) {
   const l = { kind, name: name || LAYER_NAMES[kind], stream: null, visible: true, opacity: 1,
     x: 0, y: 0, w: 1, pa: 16 / 9, preset: 'full', crop: { t: 0, b: 0, l: 0, r: 0 }, shape: 'round' };
+  // รหัสเลเยอร์สำหรับจำในฉาก: จอ/กล้องมีชิ้นเดียว · URL มีเฉพาะรอบนี้ · รูปใช้ uid ที่บันทึกไว้
+  l.sid = kind === 'screen' || kind === 'cam' ? kind : (kind === 'web' ? 'w:' : 'i:') + Math.random().toString(36).slice(2, 9);
   if (kind !== 'image') l.video = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
   return l;
 }
@@ -387,6 +389,7 @@ function draw() {
   const H = canvas.height;
   ctx2d.fillStyle = '#000';
   ctx2d.fillRect(0, 0, W, H);
+  drawSceneCard(W, H); // ฉากหลังสำเร็จรูปของฉาก (scenes.js)
   layers.forEach(drawLayer);
 
   const text = bannerText();
@@ -401,7 +404,8 @@ function draw() {
   }
   drawViewerBadge(W, H);
   drawShoutout(W, H);
-  $('stageHint').hidden = layers.some(hasContent);
+  drawTransition();
+  $('stageHint').hidden = layers.some(hasContent) || !!curScene().card;
   drawOverlay();
 }
 const bannerText = () => $('banner').value.trim();
@@ -775,7 +779,7 @@ document.querySelectorAll('[data-frame]').forEach((b) => (b.onclick = () => {
 }));
 $('lyFront').onclick = () => { if (!selected) return; layers.splice(layers.indexOf(selected), 1); layers.push(selected); renderLayerPanel(); saveLayout(); };
 $('lyBack').onclick = () => { if (!selected) return; layers.splice(layers.indexOf(selected), 1); layers.unshift(selected); renderLayerPanel(); saveLayout(); };
-$('lyHide').onclick = () => { if (!selected) return; selected.visible = !selected.visible; renderLayerPanel(); };
+$('lyHide').onclick = () => { if (!selected) return; selected.visible = !selected.visible; renderLayerPanel(); saveLayout(); };
 $('lyRemove').onclick = () => selected && removeLayer(selected);
 
 // ---------- ตัดหัวหน้าต่าง / ขอบดำ ----------
@@ -856,6 +860,7 @@ $('cropReset').onclick = () => { if (selected) { setCrop(selected, { t: 0, b: 0,
 function saveLayout() {
   store.set('layout', layers.filter((l) => l.kind === 'screen' || l.kind === 'cam').map((l) => ({ kind: l.kind, x: l.x, y: l.y, w: l.w, pa: l.pa, preset: l.preset, shape: l.shape, opacity: l.opacity, frame: l.frame, camAspect: l.camAspect })));
   saveImagesSoon();
+  if (typeof sceneCapture === 'function') sceneCapture(); // แก้เลเยอร์ = จำลงฉากที่เปิดอยู่
 }
 const savedLayout = store.get('layout', []);
 function restoreLayout(l) {
@@ -874,6 +879,7 @@ const ticker = new Worker(URL.createObjectURL(new Blob([
 let tickFps = 30;
 let lastDrawAt = 0;
 ticker.onmessage = () => {
+  if (typeof audioTick === 'function') audioTick(); // noise gate + ลดเพลงตอนพูด (mixer.js)
   const now = performance.now();
   if (now - lastDrawAt < (1000 / tickFps) * 0.6) return;
   lastDrawAt = now;
@@ -906,6 +912,7 @@ function addSource(kind, stream) {
     const restored = restoreLayout(l);
     // ภาพจอที่เคยตั้งเต็มจอ → เลือกแบบเต็มกรอบ/พอดีจอให้ตามแนวภาพตอนนี้
     if (!restored || (kind === 'screen' && ['full', 'fill'].includes(l.preset))) applyPreset(l, kind === 'cam' ? (hasOther ? 'br' : 'full') : autoFull(l));
+    sceneApplyLayer(l, true);
     if (kind === 'screen') setTimeout(() => autoCropWhenReady(l, stream), 500); // ตัดหัวหน้าต่าง + ขอบดำให้อัตโนมัติ
     if (kind === 'cam') {
       if (!l.frame || l.frame === 'none') l.frame = store.get('camFrame', 'none');
@@ -1046,6 +1053,7 @@ async function addImageLayer(blob, name, saved) {
   if (saved) {
     Object.assign(l, { x: saved.x, y: saved.y, w: saved.w, pa: saved.pa, preset: saved.preset, opacity: saved.opacity ?? 1, visible: saved.visible !== false });
     if (l.preset) applyPreset(l, l.preset);
+    sceneApplyLayer(l, false);
   } else {
     applyPreset(l, 'center');
     select(l);
@@ -1566,77 +1574,16 @@ $('srcWeb').onclick = () => {
   $('webDetails').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
-// ---------- เสียง ----------
-const actx = new AudioContext();
-const mixOut = actx.createMediaStreamDestination(); // มีแทร็กเสียงเสมอ (เงียบถ้าไม่มีแหล่ง) เพราะแพลตฟอร์มส่วนใหญ่ต้องการเสียง
-const micGain = actx.createGain();
-const analyser = actx.createAnalyser();
-analyser.fftSize = 512;
-micGain.connect(mixOut);
-micGain.connect(analyser);
-let micSrc = null;
-let micStream = null;
-let screenSrc = null;
-
-function connectScreenAudio(stream) {
-  if (screenSrc) screenSrc.disconnect();
-  screenSrc = null;
-  if (stream && stream.getAudioTracks().length) {
-    screenSrc = actx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
-    screenSrc.connect(mixOut);
-    screenSrc.connect(analyser);
-  }
-}
-
-$('micSelect').onchange = async () => {
-  if (micSrc) micSrc.disconnect();
-  if (micStream) micStream.getTracks().forEach((t) => t.stop());
-  micSrc = micStream = null;
-  const id = $('micSelect').value;
-  if (!id) return;
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: id === 'default' ? undefined : { exact: id }, echoCancellation: true, noiseSuppression: true } });
-    micSrc = actx.createMediaStreamSource(micStream);
-    micSrc.connect(micGain);
-    actx.resume();
-    listDevices();
-  } catch {
-    toast('เปิดไมค์ไม่ได้');
-  }
-};
-$('micVol').oninput = () => {
-  micGain.gain.value = $('micVol').value / 100;
-  $('micVolLabel').textContent = $('micVol').value + '%';
-};
-
-const meterData = new Uint8Array(analyser.fftSize);
-(function meter() {
-  analyser.getByteTimeDomainData(meterData);
-  let peak = 0;
-  for (const v of meterData) peak = Math.max(peak, Math.abs(v - 128));
-  $('meterBar').style.width = Math.min(100, (peak / 128) * 140) + '%';
-  requestAnimationFrame(meter);
-})();
-
-async function listDevices() {
-  const devs = await navigator.mediaDevices.enumerateDevices();
-  const fill = (sel, kind, first) => {
-    const cur = sel.value;
-    sel.innerHTML = '';
-    sel.add(new Option(first[0], first[1]));
-    devs.filter((d) => d.kind === kind).forEach((d, i) => sel.add(new Option(d.label || `${kind === 'audioinput' ? 'ไมค์' : 'กล้อง'} ${i + 1}`, d.deviceId || 'default')));
-    sel.value = [...sel.options].some((o) => o.value === cur) ? cur : sel.options[0].value;
-  };
-  fill($('micSelect'), 'audioinput', ['ไม่ใช้ไมค์', '']);
-  fill($('camSelect'), 'videoinput', ['ค่าเริ่มต้น', '']);
-  if (![...$('micSelect').options].some((o) => o.value === 'default')) $('micSelect').add(new Option('ไมค์ค่าเริ่มต้น', 'default'), 1);
-}
-listDevices();
+// ---------- เสียง: ดู mixer.js ----------
 
 // ---------- ส่งสตรีม ----------
 let ws;
-let recorder = null;
+let recorder = null; // MediaRecorder: ทำงานเมื่อกำลังไลฟ์ และ/หรือ กำลังอัดไฟล์
+let isLive = false;
+let isRec = false;
+let sessionUp = false; // Helper ตอบ 'started' แล้ว
 let liveStart = 0;
+let recStart = 0;
 let clock = null;
 let slowSince = 0;
 
@@ -1647,7 +1594,7 @@ function connect() {
   ws.onclose = () => {
     $('conn').textContent = 'ไม่ได้เชื่อมต่อ';
     $('conn').classList.remove('on');
-    if (recorder) stopRecorder('การเชื่อมต่อกับเซิร์ฟเวอร์หลุด');
+    if (recorder) stopPipeline('การเชื่อมต่อกับเซิร์ฟเวอร์หลุด');
     setTimeout(connect, 2000);
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
@@ -1656,19 +1603,43 @@ function connect() {
 function handle(m) {
   switch (m.type) {
     case 'started':
-      toast('เริ่มไลฟ์แล้ว');
+      sessionUp = true;
+      if (m.live) toast('เริ่มไลฟ์แล้ว');
       renderChips(m.dests);
+      break;
+    case 'live':
+      if (m.on) {
+        toast('เริ่มไลฟ์แล้ว');
+        renderChips(m.dests || []);
+      }
+      break;
+    case 'record':
+      if (m.on) {
+        isRec = true;
+        recStart = Date.now();
+        $('recFileNow').textContent = baseName(m.file);
+      } else {
+        isRec = false;
+        if (m.error) liveAlert('danger', '⛔ อัดไฟล์หยุด', m.error, 'rec');
+        if (m.saved) {
+          toast(`บันทึกไฟล์แล้ว (${fmtBytes(m.bytes)}) — ดูได้ที่ “อัดไฟล์” ในแท็บคุณภาพ`);
+          loadRecordings();
+        }
+      }
+      updateOutputUi();
       break;
     case 'stats': {
       $('stFps').textContent = Math.round(m.fps);
-      // tee muxer มักไม่รายงานบิตเรต (N/A) → แสดงค่าที่ตั้งไว้แทน
       // บิตเรตจริงที่ส่งออก = ผลรวมของทุกปลายทางที่ออนไลน์
       const out = (m.dests || []).reduce((sum, d) => sum + (d.kbps || 0), 0);
       $('stKbps').textContent = out ? Math.round(out).toLocaleString() : '–';
       $('stSpeed').textContent = m.speed.toFixed(2) + 'x';
       $('stDrop').textContent = m.drop;
-      renderChips(m.dests);
-      watchDests(m.dests);
+      if (isLive) {
+        renderChips(m.dests);
+        watchDests(m.dests);
+      }
+      if (m.rec) $('recSize').textContent = fmtBytes(m.rec.bytes);
       advise(m);
       break;
     }
@@ -1678,12 +1649,17 @@ function handle(m) {
       break;
     case 'error':
       toast(m.message);
-      stopRecorder();
+      if (!sessionUp) stopPipeline();
+      else if (isLive) {
+        // เริ่มไลฟ์ระหว่างอัดไม่สำเร็จ → อัดต่อ
+        isLive = false;
+        updateOutputUi();
+      }
       break;
     case 'stopped':
       // หยุดเองไม่ต้องเตือน · หยุดเพราะปัญหา (ตัวเข้ารหัสดับ ฯลฯ) = เตือนแรง
-      if (recorder && !userStopping) liveAlert('danger', '⛔ ไลฟ์หยุดทั้งหมด', m.reason || 'ตัวส่งไลฟ์หยุดทำงาน — กดเริ่มไลฟ์ใหม่', 'all');
-      stopRecorder(m.reason);
+      if (recorder && !userStopping && (isLive || isRec)) liveAlert('danger', isLive ? '⛔ ไลฟ์หยุดทั้งหมด' : '⛔ อัดไฟล์หยุด', m.reason || 'ตัวส่งไลฟ์หยุดทำงาน — กดเริ่มใหม่', 'all');
+      stopPipeline(userStopping ? '' : m.reason);
       break;
   }
 }
@@ -1827,7 +1803,6 @@ function advise(m) {
   showAdvice('');
 }
 
-$('btnLive').onclick = () => (recorder ? stopLive() : startLive());
 
 // ---------- หน้าต่างภาพสะอาดสำหรับ TikTok LIVE Studio / OBS (Window capture) ----------
 let outputWin = null;
@@ -1847,31 +1822,50 @@ function pickMime() {
   return opts.find((t) => MediaRecorder.isTypeSupported(t));
 }
 
-async function startLive() {
-  calc();
+const baseName = (p) => String(p || '').split(/[\\/]/).pop();
+const fmtBytes = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : Math.round((b || 0) / 1e6) + ' MB');
+const hhmmss = (ms) => {
+  const s = Math.floor(ms / 1000);
+  return [s / 3600, (s / 60) % 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, '0')).join(':');
+};
+const recSupported = () => H && !window.versionLess(H.version, '1.5.0');
+
+// ปลายทางที่จะไลฟ์ (null = ยังไม่พร้อม พร้อมบอกเหตุผลแล้ว)
+function liveDestinations() {
   const active = dests.filter((d) => d.on);
   if (!active.length) {
     showTab('dest');
-    return toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
+    toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
+    return null;
   }
   const missing = active.find((d) => !d.url || !d.key);
   if (missing) {
     showTab('dest');
-    return toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
+    toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
+    return null;
   }
+  return active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key }));
+}
+
+function helperReady() {
   if (!H) {
     showHelperMissing();
     $('helperCard').scrollIntoView({ behavior: 'smooth' });
-    return toast('ต้องติดตั้งและเปิด Yoddoy Helper บนเครื่องนี้ก่อนไลฟ์');
+    toast('ต้องติดตั้งและเปิด Yoddoy Helper บนเครื่องนี้ก่อน');
+    return false;
   }
-  if (!ws || ws.readyState !== WebSocket.OPEN) return toast('ยังไม่ได้เชื่อมต่อ Yoddoy Helper');
-  await actx.resume();
-  // ขอสิทธิ์แจ้งเตือนของ Windows ไว้เตือนตอนไลฟ์หลุด (ถามครั้งเดียว)
-  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
-  userStopping = false;
-  for (const k of Object.keys(destPrev)) delete destPrev[k];
-  $('alertStack').innerHTML = '';
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    toast('ยังไม่ได้เชื่อมต่อ Yoddoy Helper');
+    return false;
+  }
+  return true;
+}
 
+// เริ่มส่งภาพ+เสียงไป Helper (ใช้ร่วมกันทั้งไลฟ์และอัดไฟล์)
+async function startPipeline({ destinations, record }) {
+  calc();
+  await actx.resume();
+  sessionUp = false;
   setTickFps(plan.fps);
   const video = canvas.captureStream(plan.fps).getVideoTracks()[0];
   const stream = new MediaStream([video, mixOut.stream.getAudioTracks()[0]]);
@@ -1887,9 +1881,8 @@ async function startLive() {
   };
   recorder.onerror = (e) => {
     appendLog('MediaRecorder error: ' + ((e.error && e.error.message) || 'unknown'));
-    toast('เบราว์เซอร์หยุดบันทึกภาพ — กดเริ่มไลฟ์ใหม่');
+    toast('เบราว์เซอร์หยุดบันทึกภาพ — กดเริ่มใหม่');
   };
-
   ws.send(JSON.stringify({
     type: 'start',
     width: plan.width, height: plan.height, fps: plan.fps,
@@ -1897,46 +1890,162 @@ async function startLive() {
     encoder: $('encoder').value,
     latency: $('latency').value,
     delaySec: delaySec(),
-    destinations: active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key })),
+    destinations: destinations || [],
+    record: !!record,
   }));
   recorder.start(RECORDER_SLICE[$('latency').value] || 250);
+  clearInterval(clock);
+  clock = setInterval(updateClock, 1000);
+}
 
+function beginLiveUi() {
+  userStopping = false;
+  for (const k of Object.keys(destPrev)) delete destPrev[k];
+  $('alertStack').innerHTML = '';
+  // ขอสิทธิ์แจ้งเตือนของ Windows ไว้เตือนตอนไลฟ์หลุด (ถามครั้งเดียว)
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+  isLive = true;
   liveStart = Date.now();
-  $('liveBadge').hidden = false;
-  $('btnLive').textContent = 'หยุดไลฟ์';
-  $('btnLive').classList.add('live');
-  lockSettings(true);
-  clock = setInterval(() => {
-    const s = Math.floor((Date.now() - liveStart) / 1000);
-    $('liveTime').textContent = [s / 3600, (s / 60) % 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, '0')).join(':');
-  }, 1000);
+}
+
+async function startLive() {
+  const list = liveDestinations();
+  if (!list || !helperReady()) return;
+  beginLiveUi();
+  if (recorder) {
+    // กำลังอัดอยู่ → เริ่มไลฟ์ต่อจากภาพเดิม ไม่ต้องเริ่มใหม่
+    ws.send(JSON.stringify({ type: 'golive', destinations: list, delaySec: delaySec() }));
+  } else {
+    const record = $('recWithLive').checked && recSupported();
+    if (record) { isRec = true; recStart = Date.now(); }
+    await startPipeline({ destinations: list, record });
+  }
+  updateOutputUi();
 }
 
 function stopLive() {
   userStopping = true;
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
-  stopRecorder('หยุดไลฟ์แล้ว');
   $('alertStack').innerHTML = '';
+  if (isRec) {
+    // อัดไฟล์อยู่ → หยุดแค่ไลฟ์ อัดต่อ
+    ws.send(JSON.stringify({ type: 'endlive' }));
+    isLive = false;
+    $('destStatus').innerHTML = '';
+    updateOutputUi();
+    toast('หยุดไลฟ์แล้ว — ยังอัดไฟล์อยู่');
+    userStopping = false;
+    return;
+  }
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+  stopPipeline('หยุดไลฟ์แล้ว');
 }
 
-function stopRecorder(reason) {
+async function startRec() {
+  if (!helperReady()) return;
+  if (!recSupported()) {
+    $('helperCard').hidden = false;
+    $('helperUpdate').hidden = false;
+    $('helperDesktop').hidden = true;
+    return toast('การอัดไฟล์ต้องใช้ Yoddoy Helper 1.5.0 ขึ้นไป — ดาวน์โหลดเวอร์ชันใหม่ด้านบน');
+  }
+  isRec = true;
+  recStart = Date.now();
+  if (recorder) ws.send(JSON.stringify({ type: 'record', on: true }));
+  else {
+    userStopping = false;
+    await startPipeline({ destinations: [], record: true });
+  }
+  updateOutputUi();
+}
+
+function stopRec() {
   if (!recorder) return;
-  if (recorder.state !== 'inactive') recorder.stop();
+  if (isLive) {
+    ws.send(JSON.stringify({ type: 'record', on: false }));
+    isRec = false;
+    updateOutputUi();
+    return;
+  }
+  userStopping = true;
+  ws.send(JSON.stringify({ type: 'stop' }));
+  stopPipeline('');
+}
+
+function stopPipeline(reason) {
+  const was = !!recorder;
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
   recorder = null;
+  isLive = false;
+  isRec = false;
+  sessionUp = false;
   clearInterval(clock);
-  $('liveBadge').hidden = true;
-  $('btnLive').textContent = 'เริ่มไลฟ์';
-  $('btnLive').classList.remove('live');
-  lockSettings(false);
+  updateOutputUi();
   showAdvice('');
-  if (reason) toast(reason);
+  if (reason && was) toast(reason);
   setTickFps(30);
 }
 
-function lockSettings(on) {
-  for (const id of ['orient', 'manual', 'res', 'fps', 'vkbps', 'akbps', 'encoder', 'upload', 'btnAdd', 'btnSpeed', 'latency', 'delaySec']) $(id).disabled = on;
-  $('destList').querySelectorAll('input,button').forEach((el) => (el.disabled = on));
+function updateClock() {
+  $('liveTime').textContent = hhmmss(Date.now() - liveStart);
+  $('recTime').textContent = hhmmss(Date.now() - recStart);
 }
+
+function updateOutputUi() {
+  $('liveBadge').hidden = !isLive;
+  $('recBadge').hidden = !isRec;
+  $('btnLive').textContent = isLive ? 'หยุดไลฟ์' : 'เริ่มไลฟ์';
+  $('btnLive').classList.toggle('live', isLive);
+  $('btnRec').classList.toggle('on', isRec);
+  $('btnRec').title = isRec ? 'หยุดอัดไฟล์' : 'อัดไฟล์ MP4 (ไม่ต้องไลฟ์ก็ได้)';
+  $('btnRec').setAttribute('aria-label', $('btnRec').title);
+  $('btnRec').querySelector('span').textContent = isRec ? 'หยุดอัด' : 'อัด';
+  $('recNow').hidden = !isRec;
+  if (!isRec) $('recSize').textContent = '';
+  if (!isLive) $('destStatus').innerHTML = '';
+  updateClock();
+  lockSettings();
+}
+
+function lockSettings() {
+  // ภาพ/บิตเรตเปลี่ยนไม่ได้ระหว่างส่ง · ปลายทางล็อกเฉพาะตอนไลฟ์
+  for (const id of ['orient', 'manual', 'res', 'fps', 'vkbps', 'akbps', 'encoder', 'upload', 'btnSpeed', 'latency']) $(id).disabled = !!recorder;
+  for (const id of ['btnAdd', 'delaySec']) $(id).disabled = isLive;
+  $('destList').querySelectorAll('input,button').forEach((el) => (el.disabled = isLive));
+}
+
+// ---------- ไฟล์ที่อัดไว้ ----------
+$('recWithLive').checked = store.get('recWithLive', false);
+$('recWithLive').onchange = () => store.set('recWithLive', $('recWithLive').checked);
+async function loadRecordings() {
+  if (!H || !recSupported()) {
+    $('recList').innerHTML = '';
+    $('recDir').textContent = H ? 'ต้องอัปเดต Yoddoy Helper เป็น 1.5.0 ขึ้นไป' : 'ต้องเปิด Yoddoy Helper';
+    return;
+  }
+  try {
+    const j = await (await fetch(H.base + '/api/recordings')).json();
+    $('recDir').textContent = 'เก็บไว้ที่ ' + j.dir;
+    $('recList').innerHTML = '';
+    for (const f of j.files.slice(0, 8)) {
+      const row = document.createElement('div');
+      row.className = 'rec-row';
+      row.innerHTML = '<span class="rec-name"></span><span class="muted small"></span><button class="btn small">เปิด</button>';
+      row.querySelector('.rec-name').textContent = f.name.replace(/^Yoddoy-|\.mp4$/g, '').replace('_', ' ');
+      row.querySelector('.muted').textContent = fmtBytes(f.bytes);
+      row.querySelector('button').onclick = () => openRecFolder(f.name);
+      $('recList').append(row);
+    }
+    if (!j.files.length) $('recList').innerHTML = '<p class="muted small">ยังไม่มีไฟล์</p>';
+  } catch {}
+}
+function openRecFolder(name) {
+  if (!H) return;
+  fetch(H.base + '/api/recordings/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name || '' }) }).catch(() => {});
+}
+$('recOpen').onclick = () => openRecFolder('');
+
+$('btnLive').onclick = () => (isLive ? stopLive() : startLive());
+$('btnRec').onclick = () => (isRec ? stopRec() : startRec());
 
 window.addEventListener('beforeunload', (e) => {
   if (recorder) e.preventDefault();
@@ -1956,6 +2065,7 @@ window.helper.then((h) => {
   }
   connect();
   loadEncoders();
+  loadRecordings();
 });
 // ติดตั้ง Helper เสร็จแล้วกลับมาที่แท็บนี้ → ลองหาใหม่อัตโนมัติ
 window.addEventListener('focus', async () => {

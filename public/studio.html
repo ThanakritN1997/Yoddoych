@@ -26,7 +26,9 @@
     </nav>
     <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
     <div class="appbar-spacer"></div>
+    <div id="recBadge" class="live-badge rec-badge" hidden><span class="dot"></span> REC <span id="recTime">00:00:00</span></div>
     <div id="liveBadge" class="live-badge" hidden><span class="dot"></span> LIVE <span id="liveTime">00:00:00</span></div>
+    <button id="btnRec" class="btn rec-btn" title="อัดไฟล์ MP4 (ไม่ต้องไลฟ์ก็ได้)" aria-label="อัดไฟล์ MP4"><i></i><span>อัด</span></button>
     <button id="btnLive" class="btn live-cta">เริ่มไลฟ์</button>
   </header>
 
@@ -105,6 +107,50 @@
 
       <!-- ===== ฉาก ===== -->
       <div class="tabpanel" data-panel="scene">
+        <section class="card">
+          <div class="beauty-head">
+            <h2>ฉาก <span class="tag">กด 1–9 สลับ</span></h2>
+            <select id="sceneTrans" class="mini-select" aria-label="การเปลี่ยนฉาก">
+              <option value="400">เฟด</option>
+              <option value="1000">เฟดช้า</option>
+              <option value="0">ตัดทันที</option>
+            </select>
+          </div>
+          <div id="sceneGrid" class="scene-grid"></div>
+          <details id="sceneEdit" class="sub-box web-box">
+            <summary>ตั้งค่าฉาก “<span id="sceneEditName"></span>”</summary>
+            <label class="field">ชื่อฉาก
+              <input id="sceneName" type="text" maxlength="30" autocomplete="off">
+            </label>
+            <label class="field">ฉากหลังสำเร็จรูป
+              <select id="sceneCardStyle">
+                <option value="">ไม่มี — ใช้เลเยอร์อย่างเดียว</option>
+                <option value="soon">⏳ เริ่มเร็ว ๆ นี้</option>
+                <option value="brb">☕ พักเดี๋ยวมา</option>
+                <option value="end">❤️ จบไลฟ์</option>
+                <option value="plain">ข้อความเรียบ ๆ</option>
+              </select>
+            </label>
+            <div id="sceneCardBox">
+              <label class="field">ข้อความใหญ่
+                <input id="sceneTitle" type="text" maxlength="60" autocomplete="off">
+              </label>
+              <label class="field">ข้อความรอง
+                <input id="sceneSub" type="text" maxlength="80" autocomplete="off">
+              </label>
+              <div class="row nowrap add-row">
+                <label class="field inline">นับถอยหลัง (นาที) <input id="sceneCountdown" type="number" min="0" max="180" value="0"></label>
+                <button id="sceneRestart" class="btn small" type="button">↺ นับใหม่</button>
+              </div>
+              <label id="sceneAutoNextRow" class="check small"><input id="sceneAutoNext" type="checkbox"> หมดเวลาแล้วสลับไปฉากหลักเอง</label>
+            </div>
+            <label class="check small"><input id="sceneMuteMic" type="checkbox"> ปิดไมค์เมื่ออยู่ฉากนี้</label>
+            <p class="muted small">จัดเลเยอร์ (แสดง/ซ่อน ย้าย ย่อขยาย) ระหว่างอยู่ฉากไหน ฉากนั้นจะจำไว้เอง</p>
+            <button id="sceneDelete" class="btn small danger-text">ลบฉากนี้</button>
+          </details>
+          <button id="sceneAdd" class="btn small">+ เพิ่มฉาก (เริ่มจากการจัดวางตอนนี้)</button>
+        </section>
+
         <section id="mirrorCard" class="card mirror-card" hidden>
           <div class="mirror-head">
             <h2>สะท้อนหน้าจอ iPhone <span class="tag">AirPlay</span></h2>
@@ -350,15 +396,59 @@
       <!-- ===== เสียง ===== -->
       <div class="tabpanel" data-panel="audio" hidden>
         <section class="card">
-          <h2>เสียง</h2>
+          <h2>มิกเซอร์ <span class="tag">M = ปิด/เปิดไมค์</span></h2>
           <label class="field">ไมโครโฟน
             <select id="micSelect"><option value="">ไม่ใช้ไมค์</option></select>
           </label>
-          <label class="field">ระดับไมค์ <span id="micVolLabel" class="muted small">100%</span>
-            <input id="micVol" type="range" min="0" max="200" value="100">
-          </label>
-          <div class="meter"><div id="meterBar"></div></div>
+          <div id="mixer" class="mixer"></div>
           <p class="muted small">เสียงจากหน้าจอ/แท็บรวมเข้ามาอัตโนมัติถ้าติ๊ก “แชร์เสียง” ตอนเลือกจอ · เสียงจาก iPhone (AirPlay) ออกลำโพงคอม ให้เลือก “หน้าจอทั้งหมด” + แชร์เสียงระบบ</p>
+        </section>
+
+        <section class="card">
+          <h2>ปรับเสียงไมค์</h2>
+          <label class="check small"><input id="mixNs" type="checkbox"> ตัดเสียงรบกวน + เสียงสะท้อน (พัดลม แอร์ คีย์บอร์ด)</label>
+          <label class="check small"><input id="mixComp" type="checkbox"> ปรับเสียงให้สม่ำเสมอ (พูดเบา–ดังใกล้กัน)</label>
+          <label class="check small"><input id="mixGate" type="checkbox"> ตัดเสียงตอนไม่ได้พูด (Noise gate)</label>
+          <div id="mixGateRow" class="gate-box">
+            <div class="mix-meter gate-meter"><div id="gateMeter"></div><b id="gateMark"></b></div>
+            <div class="beauty-slider">
+              <span class="beauty-name">ความไว</span>
+              <input id="mixGateTh" type="range" min="-80" max="-20" step="1">
+              <span id="mixGateVal" class="beauty-val"></span>
+            </div>
+            <p class="muted small">เลื่อนเส้นให้อยู่ <b>เหนือ</b> ระดับเสียงตอนเงียบ แต่ <b>ต่ำกว่า</b> ตอนพูด · แถบเป็นสีเขียว = ไมค์เปิด</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>เพลงพื้นหลัง</h2>
+          <div id="musicList" class="track-list"></div>
+          <p id="musicEmpty" class="muted small">ยังไม่มีเพลง — เพิ่มไฟล์ MP3/M4A/WAV จากเครื่อง (ใช้เพลงที่มีสิทธิ์ใช้ในไลฟ์ เพื่อไม่ให้โดนลิขสิทธิ์)</p>
+          <div id="musicCtl" class="row" hidden>
+            <button id="musicPlay" class="btn primary small">▶ เล่น</button>
+            <button id="musicNext" class="btn small">⏭ เพลงถัดไป</button>
+            <select id="musicMode" class="mini-select" aria-label="รูปแบบการเล่น">
+              <option value="all">เล่นวนทั้งหมด</option>
+              <option value="shuffle">สุ่ม</option>
+              <option value="one">วนเพลงเดียว</option>
+            </select>
+          </div>
+          <p id="musicNow" class="muted small"></p>
+          <label class="btn small file-btn">+ เพิ่มเพลง<input id="musicFile" type="file" accept="audio/*" multiple hidden></label>
+          <label class="check small"><input id="mixDuck" type="checkbox"> ลดเสียงเพลงอัตโนมัติตอนพูด</label>
+          <div id="mixDuckRow" class="beauty-slider">
+            <span class="beauty-name">ลดเหลือ</span>
+            <input id="mixDuckLevel" type="range" min="5" max="80">
+            <span id="mixDuckVal" class="beauty-val"></span>
+          </div>
+          <label class="check small"><input id="mixMonitor" type="checkbox"> ได้ยินเพลง/เอฟเฟกต์ในลำโพงด้วย (แนะนำใส่หูฟัง)</label>
+        </section>
+
+        <section class="card">
+          <h2>เอฟเฟกต์เสียง</h2>
+          <div id="sfxPads" class="sfx-grid"></div>
+          <label class="btn small file-btn">+ เพิ่มเสียงของฉัน<input id="sfxFile" type="file" accept="audio/*" multiple hidden></label>
+          <p class="muted small">คลิกขวาที่เสียงที่เพิ่มเองเพื่อลบ</p>
         </section>
       </div>
 
@@ -430,6 +520,18 @@
           </label>
           <div id="latencyInfo" class="calc small"></div>
         </section>
+
+        <section class="card">
+          <h2>อัดไฟล์ <span class="tag">MP4</span></h2>
+          <p class="muted small">กดปุ่ม <b>⏺ อัด</b> แถบบนเพื่ออัดอย่างเดียว (ไม่ไลฟ์) หรืออัดไปพร้อมไลฟ์ — ได้ไฟล์ความละเอียดเดียวกับที่ไลฟ์ ไว้ตัดคลิปลง TikTok/Reels/Shorts</p>
+          <label class="check small"><input id="recWithLive" type="checkbox"> อัดไฟล์อัตโนมัติทุกครั้งที่เริ่มไลฟ์</label>
+          <p id="recNow" class="rec-now small" hidden>⏺ กำลังอัด <b id="recFileNow"></b> · <span id="recSize"></span></p>
+          <div id="recList" class="rec-list"></div>
+          <div class="row">
+            <button id="recOpen" class="btn small">📂 เปิดโฟลเดอร์</button>
+            <span id="recDir" class="muted small"></span>
+          </div>
+        </section>
       </div>
 
       <!-- ===== แชท ===== -->
@@ -474,6 +576,8 @@
   <script src="beauty.js"></script>
   <script src="face.js"></script>
   <script src="studio.js"></script>
+  <script src="mixer.js"></script>
+  <script src="scenes.js"></script>
   <script src="mirror-control.js"></script>
 </body>
 </html>

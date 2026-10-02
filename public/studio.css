@@ -327,3 +327,71 @@ body.studio-page {
   .tabs button { font-size: 11px; }
   .live-cta { padding: 9px 14px !important; }
 }
+
+/* ---------- อัดไฟล์ ---------- */
+.rec-btn { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 14px; padding: 9px 14px; }
+.rec-btn i { width: 11px; height: 11px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px rgba(255, 77, 94, .18); }
+.rec-btn.on { border-color: var(--danger) !important; color: #ffb3bc; }
+.rec-btn.on i { border-radius: 2px; animation: pulse 1.2s infinite; }
+.rec-badge { background: rgba(255, 255, 255, .06); color: #ffb3bc; border-color: rgba(255, 77, 94, .3); }
+.rec-now { color: #ffb3bc; background: rgba(255, 77, 94, .08); border: 1px solid rgba(255, 77, 94, .3); border-radius: 10px; padding: 8px 10px; margin: 10px 0 0; }
+.rec-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.rec-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: #0f1219; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.rec-row .rec-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---------- ฉาก ---------- */
+.mini-select { width: auto !important; padding: 5px 8px !important; font-size: 13px !important; }
+.scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin: 10px 0; }
+.scene-btn { display: flex; flex-direction: column; gap: 6px; padding: 6px; background: #0f1219; border: 2px solid var(--line); border-radius: 12px; color: var(--text); cursor: pointer; text-align: left; transition: border-color .15s, transform .05s; font: inherit; }
+.scene-btn:hover { border-color: #4a5468; }
+.scene-btn:active { transform: translateY(1px); }
+.scene-btn.active { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124, 92, 255, .2); }
+.scene-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 7px; background: #000; display: block; }
+.scene-label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; min-width: 0; }
+.scene-label span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-label kbd { font: 700 11px/1 ui-monospace, monospace; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 3px 5px; }
+.scene-btn.active kbd { color: #fff; background: var(--accent); border-color: var(--accent); }
+.scene-label em { font-style: normal; font-size: 12px; }
+
+/* ---------- มิกเซอร์ ---------- */
+.mixer { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.mix-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; background: #0f1219; border: 1px solid var(--line); border-radius: 12px; }
+.mix-row.muted-ch { opacity: .6; }
+.mix-row.master { border-style: dashed; }
+.mix-icon { font-size: 20px; width: 28px; text-align: center; flex: none; }
+.mix-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mix-top { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.mix-top b { font-weight: 600; }
+.mix-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-val { margin-left: auto; font-variant-numeric: tabular-nums; }
+.mix-meter { position: relative; height: 6px; background: #1a1f2a; border-radius: 99px; overflow: hidden; }
+.mix-meter div { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), #a3e635 70%, var(--warn)); transition: width .06s linear; border-radius: 99px; }
+.mix-meter div.hot { background: linear-gradient(90deg, var(--ok), var(--warn) 60%, var(--danger)); }
+.mix-main input[type=range] { margin: 0; }
+.mix-mute { flex: none; min-width: 40px; font-size: 16px !important; }
+.gate-box { margin-top: 10px; }
+.gate-meter { height: 12px; overflow: visible; }
+.gate-meter div { background: #4a5468 !important; }
+.gate-meter div.open { background: var(--ok) !important; }
+.gate-meter b { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: #fff; border-radius: 2px; }
+
+/* ---------- เพลง / เอฟเฟกต์เสียง ---------- */
+.track-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; max-height: 260px; overflow-y: auto; }
+.track { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #0f1219; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.track.playing { border-color: var(--accent); }
+.track-play { width: 30px; height: 30px; flex: none; border-radius: 50%; border: 0; background: var(--panel-2); color: var(--text); cursor: pointer; }
+.track.playing .track-play { background: var(--accent); color: #fff; }
+.track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-btn { display: inline-block; margin-top: 10px; cursor: pointer; }
+.sfx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; margin-top: 10px; }
+.sfx-pad { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 4px 8px; background: #0f1219; border: 1px solid var(--line-2); border-radius: 12px; color: var(--text); cursor: pointer; font: inherit; transition: border-color .15s, background .15s; }
+.sfx-pad span { font-size: 24px; line-height: 1; }
+.sfx-pad small { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfx-pad:hover { border-color: #4a5468; background: #141822; }
+.sfx-pad.hit { animation: padHit .35s ease-out; }
+@keyframes padHit { 0% { background: rgba(124, 92, 255, .45); transform: scale(.94); } 100% { background: #0f1219; transform: none; } }
+
+@media (max-width: 640px) {
+  .rec-btn span { display: none; }
+  .rec-badge { display: none !important; }
+}

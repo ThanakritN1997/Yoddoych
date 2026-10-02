@@ -1,6 +1,8 @@
 // สตูดิโอไลฟ์: รับวิดีโอจากเบราว์เซอร์ (WebM ผ่าน WebSocket) → FFmpeg เข้ารหัสครั้งเดียว → ตัวส่งต่อแยกต่อปลายทาง → RTMP/RTMPS ทุกแพลตฟอร์ม
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -95,6 +97,22 @@ function relayArgs(target) {
   ];
 }
 
+// อัดไฟล์: รับ TS ชุดเดียวกับที่ส่งไลฟ์ → ห่อเป็น MP4 (ไม่บีบอัดซ้ำ ไม่กินเครื่องเพิ่ม)
+// ใช้ MP4 แบบแบ่งท่อน (fragmented) → ถ้าเครื่องดับ/โปรแกรมปิดกลางคัน ไฟล์ส่วนที่อัดแล้วยังเปิดได้
+const REC_DIR = path.join(os.homedir(), 'Videos', 'Yoddoy');
+function recordArgs(file) {
+  return [
+    '-hide_banner', '-loglevel', 'warning',
+    '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '3000000', '-probesize', '4000000', '-f', 'mpegts', '-i', 'pipe:0',
+    '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy', '-bsf:a', 'aac_adtstoasc', // เสียง AAC ใน TS (ADTS) → รูปแบบที่ MP4 ต้องการ
+    '-movflags', '+frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', '-y', file,
+  ];
+}
+function recFileName(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `Yoddoy-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.mp4`;
+}
+
 function joinUrl(url, key) {
   url = String(url || '').trim();
   key = String(key || '').trim();
@@ -146,6 +164,13 @@ function eachLine(stream, fn) {
   });
 }
 
+// ข้อความจากหน้าสตูดิโอ:
+//   start   { ...ภาพ/บิตเรต, destinations[], record } → เปิดตัวเข้ารหัส + ไลฟ์ (ถ้ามีปลายทาง) + อัดไฟล์ (ถ้าเลือก)
+//   golive  { destinations[], delaySec } → เริ่มไลฟ์ระหว่างที่กำลังอัดอยู่
+//   endlive → หยุดไลฟ์ (ถ้ายังอัดอยู่ ตัวเข้ารหัสทำงานต่อ)
+//   record  { on } → เริ่ม/หยุดอัดไฟล์ระหว่างไลฟ์
+//   stop    → หยุดทั้งหมด
+// ไม่มีทั้งไลฟ์และอัดไฟล์เหลืออยู่ → ปิดตัวเข้ารหัสเอง
 function attach() {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
 
@@ -159,17 +184,30 @@ function attach() {
       session = null;
       s.stopped = true;
       clearInterval(s.delayTimer);
-      for (const r of s.relays) {
-        clearTimeout(r.timer);
-        if (r.proc) r.proc.kill('SIGKILL');
-      }
+      killRelays(s);
+      stopRecording(s);
       try { s.encoder.stdin.end(); } catch {}
       setTimeout(() => s.encoder.kill('SIGKILL'), 3000);
       send({ type: 'stopped', reason });
     }
 
+    function killRelays(s) {
+      for (const r of s.relays) {
+        clearTimeout(r.timer);
+        r.dead = true;
+        if (r.proc) r.proc.kill('SIGKILL');
+      }
+      s.relays = [];
+      s.queue = [];
+    }
+
+    // ไม่มีอะไรใช้ตัวเข้ารหัสแล้ว → ปิด
+    function stopIfIdle(s, reason) {
+      if (!s.relays.length && !s.rec) stop(reason);
+    }
+
     function startRelay(s, r) {
-      if (s.stopped) return;
+      if (s.stopped || r.dead) return;
       r.state = r.connects ? 'reconnecting' : 'connecting';
       r.connects++;
       r.bytes = 0;
@@ -191,7 +229,7 @@ function attach() {
       proc.on('exit', (code) => {
         if (r.proc !== proc) return;
         r.proc = null;
-        if (s.stopped) return;
+        if (s.stopped || r.dead) return;
         r.state = 'error';
         r.kbps = 0;
         const wait = RELAY_RETRY_MS[Math.min(r.fails, RELAY_RETRY_MS.length - 1)];
@@ -199,6 +237,55 @@ function attach() {
         send({ type: 'log', line: `[${r.name}] การเชื่อมต่อหลุด (code ${code}) — ต่อใหม่ใน ${wait / 1000} วินาที (ครั้งที่ ${r.connects})` });
         r.timer = setTimeout(() => startRelay(s, r), wait);
       });
+    }
+
+    // ตรวจปลายทาง → คืนข้อความผิดพลาด หรือ null
+    function checkDests(list) {
+      const bad = list.find((d) => !/^rtmps?:\/\/[^\s]+$/i.test(String(d.url).trim()));
+      return bad ? `${bad.name}: Server URL ต้องขึ้นต้นด้วย rtmp:// หรือ rtmps://` : null;
+    }
+
+    function goLive(s, list, delaySec) {
+      killRelays(s);
+      s.delayMs = Math.min(300, Math.max(0, Number(delaySec) || 0)) * 1000; // หน่วงเพิ่มตั้งใจ สูงสุด 5 นาที
+      const secrets = list.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
+      s.secrets = secrets;
+      s.relays = list.map((d) => ({ name: d.name, target: joinUrl(d.url, d.key), state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null }));
+      s.relays.forEach((r) => startRelay(s, r));
+    }
+
+    function startRecording(s) {
+      if (s.rec) return;
+      try {
+        fs.mkdirSync(REC_DIR, { recursive: true });
+      } catch (e) {
+        return send({ type: 'error', message: 'สร้างโฟลเดอร์เก็บไฟล์ไม่ได้: ' + e.message });
+      }
+      const file = path.join(REC_DIR, recFileName());
+      const proc = spawn(FFMPEG, recordArgs(file), { windowsHide: true });
+      const rec = { proc, file, bytes: 0, startedAt: Date.now() };
+      s.rec = rec;
+      proc.stdin.on('error', () => {});
+      eachLine(proc.stderr, (line) => send({ type: 'log', line: `[อัดไฟล์] ${line}` }));
+      proc.on('exit', (code) => {
+        if (s.rec === rec) {
+          // ตัวอัดดับเอง (ดิสก์เต็ม ฯลฯ) — ไลฟ์ยังไปต่อ
+          s.rec = null;
+          send({ type: 'record', on: false, file, error: `อัดไฟล์หยุดกะทันหัน (code ${code}) — ดิสก์อาจเต็ม` });
+          if (!s.stopped) stopIfIdle(s, 'อัดไฟล์หยุดแล้ว');
+          return;
+        }
+        send({ type: 'record', on: false, file, saved: true, bytes: rec.bytes, sec: Math.round((Date.now() - rec.startedAt) / 1000) });
+      });
+      send({ type: 'record', on: true, file });
+    }
+
+    function stopRecording(s) {
+      const rec = s.rec;
+      if (!rec) return;
+      s.rec = null;
+      try { rec.proc.stdin.end(); } catch {} // ปิดท่อ → FFmpeg เขียนท้ายไฟล์ให้ครบแล้วออกเอง
+      setTimeout(() => rec.proc.exitCode === null && rec.proc.kill('SIGKILL'), 8000);
     }
 
     ws.on('message', (data, isBinary) => {
@@ -213,9 +300,9 @@ function attach() {
       if (msg.type === 'start') {
         if (session) stop('restart');
         const enabled = (msg.destinations || []).filter((d) => d.url);
-        if (!enabled.length) return send({ type: 'error', message: 'ยังไม่ได้ใส่ปลายทางที่จะไลฟ์' });
-        const bad = enabled.find((d) => !/^rtmps?:\/\/[^\s]+$/i.test(String(d.url).trim()));
-        if (bad) return send({ type: 'error', message: `${bad.name}: Server URL ต้องขึ้นต้นด้วย rtmp:// หรือ rtmps://` });
+        if (!enabled.length && !msg.record) return send({ type: 'error', message: 'ยังไม่ได้ใส่ปลายทางที่จะไลฟ์' });
+        const err = checkDests(enabled);
+        if (err) return send({ type: 'error', message: err });
         const encs = detectEncoders().map((e) => e.id);
         const cfg = {
           width: Math.min(3840, Math.max(320, msg.width | 0)) & ~1,
@@ -225,15 +312,17 @@ function attach() {
           audioKbps: [96, 128, 160, 192].includes(msg.audioKbps) ? msg.audioKbps : 160,
           encoder: encs.includes(msg.encoder) ? msg.encoder : encs[0] || 'libx264',
           latency: LATENCY[msg.latency] ? msg.latency : 'normal',
-          delayMs: Math.min(300, Math.max(0, Number(msg.delaySec) || 0)) * 1000, // หน่วงเพิ่มตั้งใจ สูงสุด 5 นาที
         };
-        const secrets = enabled.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
         const s = {
           stopped: false,
-          hide: (line) => secrets.reduce((acc, k) => acc.split(k).join('••••'), line),
-          relays: enabled.map((d) => ({ name: d.name, target: joinUrl(d.url, d.key), state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null })),
+          relays: [],
+          queue: [],
+          secrets: [],
+          delayMs: 0,
+          rec: null,
+          hide: (line) => s.secrets.reduce((acc, k) => acc.split(k).join('••••'), line),
         };
-        const publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1) }));
+        s.publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1) }));
 
         s.encoder = spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true });
         session = s;
@@ -251,22 +340,27 @@ function attach() {
             r.proc.stdin.write(chunk);
           }
         };
-        if (cfg.delayMs > 0) {
-          // หน่วงเวลาเพิ่ม: เก็บข้อมูลไว้ในคิว แล้วค่อยปล่อยเมื่อครบเวลา (ทุกปลายทางหน่วงเท่ากัน)
-          const queue = [];
-          s.encoder.stdout.on('data', (chunk) => queue.push({ t: Date.now(), chunk }));
-          s.delayTimer = setInterval(() => {
-            const due = Date.now() - cfg.delayMs;
-            while (queue.length && queue[0].t <= due) distribute(queue.shift().chunk);
-          }, 50);
-        } else {
-          s.encoder.stdout.on('data', distribute);
-        }
+        s.encoder.stdout.on('data', (chunk) => {
+          // ไฟล์อัด: ได้ภาพทันทีไม่หน่วง (ดีเลย์ตั้งใจมีผลกับไลฟ์เท่านั้น)
+          if (s.rec && s.rec.proc.stdin.writable) {
+            s.rec.bytes += chunk.length;
+            s.rec.proc.stdin.write(chunk);
+          }
+          if (!s.relays.length) return;
+          if (s.delayMs > 0) s.queue.push({ t: Date.now(), chunk });
+          else distribute(chunk);
+        });
+        // หน่วงเวลาเพิ่ม: เก็บข้อมูลไว้ในคิว แล้วค่อยปล่อยเมื่อครบเวลา (ทุกปลายทางหน่วงเท่ากัน)
+        s.delayTimer = setInterval(() => {
+          const due = Date.now() - s.delayMs;
+          while (s.queue.length && s.queue[0].t <= due) distribute(s.queue.shift().chunk);
+        }, 50);
 
         eachLine(s.encoder.stderr, (raw) => {
           const line = s.hide(raw);
           if (line.startsWith('frame=')) {
-            send({ type: 'stats', fps: num(line, 'fps'), kbps: 0, dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed'), dests: publicDests() });
+            const rec = s.rec && { sec: Math.round((Date.now() - s.rec.startedAt) / 1000), bytes: s.rec.bytes };
+            send({ type: 'stats', fps: num(line, 'fps'), kbps: 0, dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed'), dests: s.publicDests(), rec });
             return;
           }
           send({ type: 'log', line: `[encoder] ${line}` });
@@ -277,8 +371,32 @@ function attach() {
         });
         s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
 
-        s.relays.forEach((r) => startRelay(s, r));
-        send({ type: 'started', encoder: cfg.encoder, latency: cfg.latency, delaySec: cfg.delayMs / 1000, dests: publicDests() });
+        if (msg.record) startRecording(s);
+        if (enabled.length) goLive(s, enabled, msg.delaySec);
+        send({ type: 'started', encoder: cfg.encoder, latency: cfg.latency, delaySec: s.delayMs / 1000, live: enabled.length > 0, dests: s.publicDests() });
+      }
+
+      if (msg.type === 'golive' && session) {
+        const enabled = (msg.destinations || []).filter((d) => d.url);
+        if (!enabled.length) return send({ type: 'error', message: 'ยังไม่ได้ใส่ปลายทางที่จะไลฟ์' });
+        const err = checkDests(enabled);
+        if (err) return send({ type: 'error', message: err });
+        goLive(session, enabled, msg.delaySec);
+        send({ type: 'live', on: true, delaySec: session.delayMs / 1000, dests: session.publicDests() });
+      }
+
+      if (msg.type === 'endlive' && session) {
+        killRelays(session);
+        send({ type: 'live', on: false });
+        stopIfIdle(session, 'หยุดไลฟ์แล้ว');
+      }
+
+      if (msg.type === 'record' && session) {
+        if (msg.on) startRecording(session);
+        else {
+          stopRecording(session);
+          stopIfIdle(session, 'หยุดอัดแล้ว');
+        }
       }
 
       if (msg.type === 'stop') stop('หยุดไลฟ์แล้ว');
@@ -335,6 +453,30 @@ async function handleApi(req, res) {
       return json(400, { error: e.message });
     }
   }
+  // ไฟล์ที่อัดไว้ล่าสุด
+  if (req.url === '/api/recordings' && req.method === 'GET') {
+    let files = [];
+    try {
+      files = fs.readdirSync(REC_DIR).filter((f) => /\.mp4$/i.test(f)).map((f) => {
+        const st = fs.statSync(path.join(REC_DIR, f));
+        return { name: f, bytes: st.size, mtime: st.mtimeMs };
+      }).sort((a, b) => b.mtime - a.mtime).slice(0, 20);
+    } catch {}
+    return json(200, { dir: REC_DIR, files });
+  }
+  // เปิดโฟลเดอร์ไฟล์อัดใน Explorer — POST + JSON เท่านั้น (เว็บอื่นยิงมาแบบ <img>/ฟอร์มไม่ได้)
+  if (req.url === '/api/recordings/open' && req.method === 'POST') {
+    if (!String(req.headers['content-type'] || '').startsWith('application/json')) return json(415, { error: 'json only' });
+    let body = '';
+    for await (const c of req) if ((body += c).length > 4096) return json(413, {});
+    let name = '';
+    try { name = String(JSON.parse(body || '{}').name || ''); } catch {}
+    try { fs.mkdirSync(REC_DIR, { recursive: true }); } catch {}
+    const file = name && path.join(REC_DIR, path.basename(name));
+    const args = file && fs.existsSync(file) ? ['/select,', file] : [REC_DIR];
+    if (process.platform === 'win32') spawn('explorer.exe', args, { detached: true, stdio: 'ignore' }).unref();
+    return json(200, { ok: true });
+  }
   if (req.url === '/api/encoders') {
     return json(200, { ffmpeg: !!FFMPEG, encoders: detectEncoders() });
   }
@@ -348,4 +490,4 @@ async function handleApi(req, res) {
   return false;
 }
 
-module.exports = { attach, handleApi, detectEncoders, _test: { encoderArgs, relayArgs, FFMPEG } };
+module.exports = { attach, handleApi, detectEncoders, _test: { encoderArgs, relayArgs, recordArgs, REC_DIR, FFMPEG } };
