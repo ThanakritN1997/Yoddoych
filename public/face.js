@@ -13,129 +13,139 @@ const LM = {
   lCheek: 50, rCheek: 280, lJaw: 172, rJaw: 397, lMid: 132, rMid: 361, lJaw2: 58, rJaw2: 288, lFold: 205, rFold: 425,
 };
 
+// ---------- ตัวกลางคุยกับ vision-worker.js ----------
+// หน้าเว็บส่งเฟรมย่อ (ImageBitmap) ให้ worker ทีละเฟรม ถ้า worker ยังทำงานเฟรมก่อนอยู่ = ข้ามไป (ไม่ต่อคิว)
+// → การวาดภาพ/ส่งวิดีโอไม่ต้องรอ AI เลย แม้ AI จะช้ากว่าเฟรมเรตของไลฟ์ก็ตาม
+const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+// 1 worker ต่อ 1 งาน (ใบหน้า / พื้นหลัง) → ทำงานขนานกัน ไม่ต้องรอกันเอง
+class VisionHub {
+  constructor(task, inputW) {
+    this.task = task;
+    this.inputW = inputW; // ย่อเฟรมก่อนส่งเข้า AI (ใบหน้า 480 / พื้นหลัง 320 พอ)
+    // ใช้ CPU เป็นหลัก: ระหว่างไลฟ์การ์ดจอยุ่งกับฟิลเตอร์+เข้ารหัสวิดีโอ วัดแล้ว CPU เร็วกว่า (หน้า 15.8 vs 6, พื้นหลัง 14 vs 10 ครั้ง/วินาที)
+    // และ worker มีเธรดของตัวเอง จึงไม่ถ่วงหน้าเว็บ
+    this.prefer = 'CPU';
+    this.worker = null;
+    this.busy = false;
+    this.ready = false;
+    this.loading = null;
+    this.lastTime = -1;
+    this.onResult = null;
+  }
+  load() {
+    if (this.loading) return this.loading;
+    this.worker = this.worker || new Worker('vision-worker.js');
+    this.worker.onmessage = (e) => this.onMsg(e.data);
+    this.worker.onerror = () => { this.busy = false; };
+    this.loading = new Promise((resolve, reject) => { this.pending = { resolve, reject }; });
+    this.worker.postMessage({ type: 'init', task: this.task, base: MP_BASE, model: this.task === 'face' ? MP_MODEL : SEG_MODEL, prefer: this.prefer });
+    return this.loading;
+  }
+  // เรียกทุกเฟรม: ถ้า worker ว่างและเป็นเฟรมใหม่ → ส่งเข้าไปตรวจ, ถ้ายังไม่ว่าง → ข้าม (ไม่ต่อคิว)
+  async request(v) {
+    if (!this.ready || this.busy || !v || !v.videoWidth || v.currentTime === this.lastTime) return;
+    this.lastTime = v.currentTime;
+    this.busy = true;
+    try {
+      const w = Math.min(this.inputW, v.videoWidth);
+      const h = Math.max(2, Math.round((w * v.videoHeight) / v.videoWidth / 2) * 2);
+      const bitmap = await createImageBitmap(v, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' });
+      this.worker.postMessage({ type: 'frame', bitmap, ts: performance.now(), face: this.task === 'face', seg: this.task === 'seg' }, [bitmap]);
+    } catch {
+      this.busy = false;
+    }
+  }
+  onMsg(m) {
+    if (m.type === 'ready') {
+      this.ready = true;
+      this.delegate = m.delegate;
+      this.pending.resolve();
+    } else if (m.type === 'error') {
+      this.loading = null; // ให้ลองโหลดใหม่ได้
+      this.pending.reject(new Error(m.message));
+    } else if (m.type === 'result') {
+      this.busy = false;
+      if (this.onResult) this.onResult(m);
+    }
+  }
+}
+
 class FaceTracker {
   constructor() {
     this.state = 'off'; // off | loading | ready | error
     this.face = null; // จุดบนใบหน้าล่าสุด (ทำให้นิ่งแล้ว) พิกัด 0–1 ของภาพกล้อง
-    this.lastTime = -1;
     this.missed = 0;
+    this.hub = new VisionHub('face', 480);
+    this.hub.onResult = (m) => m.hasFace && this.ingest(m.face || null);
   }
 
-  async load() {
-    if (this.state !== 'off' && this.state !== 'error') return this.ready;
+  load() {
+    if (this.state === 'loading' || this.state === 'ready') return this.ready;
     this.state = 'loading';
-    this.ready = (async () => {
-      const vision = await import(`${MP_BASE}/vision_bundle.mjs`);
-      const files = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-      const make = (delegate) => vision.FaceLandmarker.createFromOptions(files, {
-        baseOptions: { modelAssetPath: MP_MODEL, delegate },
-        runningMode: 'VIDEO',
-        numFaces: 1,
-      });
-      try {
-        this.landmarker = await make('GPU');
-      } catch {
-        this.landmarker = await make('CPU'); // การ์ดจอบางรุ่นใช้ GPU delegate ไม่ได้
-      }
-      this.state = 'ready';
-    })().catch((e) => {
-      this.state = 'error';
-      this.error = e;
-      throw e;
-    });
+    this.ready = this.hub.load().then(
+      () => { this.state = 'ready'; },
+      (e) => { this.state = 'error'; this.error = e; throw e; },
+    );
     return this.ready;
   }
 
-  // เรียกทุกเฟรม: คืนจุดบนใบหน้า หรือ null ถ้าไม่เจอหน้า
+  // เรียกทุกเฟรม: ขอให้ worker ตรวจเฟรมนี้ (ถ้าว่าง) แล้วคืนผลล่าสุดทันที ไม่รอ
   update(video) {
-    if (this.state !== 'ready' || !video.videoWidth) return this.face;
-    if (video.currentTime === this.lastTime) return this.face; // เฟรมเดิม ไม่ต้องตรวจซ้ำ
-    this.lastTime = video.currentTime;
-    let res;
-    try {
-      res = this.landmarker.detectForVideo(video, performance.now());
-    } catch {
-      return this.face;
-    }
-    const pts = res && res.faceLandmarks && res.faceLandmarks[0];
-    if (!pts) {
+    if (this.state === 'ready') this.hub.request(video);
+    return this.face;
+  }
+
+  ingest(arr) {
+    if (!arr) {
       if (++this.missed > 5) this.face = null; // หายไปหลายเฟรม → เลิกวาด
-      return this.face;
+      return;
     }
     this.missed = 0;
     // ทำให้นิ่ง: ผสมกับตำแหน่งเดิม (กันสติกเกอร์สั่น)
     const next = {};
     for (const [k, i] of Object.entries(LM)) {
-      const p = pts[i];
+      const x = arr[i * 2];
+      const y = arr[i * 2 + 1];
       const prev = this.face && this.face[k];
-      next[k] = prev ? { x: prev.x + (p.x - prev.x) * 0.55, y: prev.y + (p.y - prev.y) * 0.55 } : { x: p.x, y: p.y };
+      next[k] = prev ? { x: prev.x + (x - prev.x) * 0.6, y: prev.y + (y - prev.y) * 0.6 } : { x, y };
     }
     this.face = next;
-    return next;
   }
 }
 
-// ---------- แยกคนออกจากพื้นหลัง (MediaPipe Selfie Segmenter) ----------
-const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+// ---------- แยกคนออกจากพื้นหลัง (MediaPipe Selfie Segmenter ใน worker) ----------
 class BgSegmenter {
   constructor() {
     this.state = 'off';
-    this.small = document.createElement('canvas'); // ย่อภาพก่อนส่งเข้า AI → เร็วและพอสำหรับขอบนุ่ม
-    this.sctx = this.small.getContext('2d', { willReadFrequently: false });
     this.mask = null; // { data: Uint8Array, w, h }
-    this.lastTime = -1;
+    this.hub = new VisionHub('seg', 320);
+    this.hub.onResult = (m) => m.mask && this.ingest(m.mask, m.w, m.h);
   }
-  async load() {
-    if (this.state !== 'off' && this.state !== 'error') return this.ready;
+  load() {
+    if (this.state === 'loading' || this.state === 'ready') return this.ready;
     this.state = 'loading';
-    this.ready = (async () => {
-      const vision = await import(`${MP_BASE}/vision_bundle.mjs`);
-      const files = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-      const make = (delegate) => vision.ImageSegmenter.createFromOptions(files, {
-        baseOptions: { modelAssetPath: SEG_MODEL, delegate },
-        runningMode: 'VIDEO',
-        outputCategoryMask: false,
-        outputConfidenceMasks: true,
-      });
-      try {
-        this.seg = await make('GPU');
-      } catch {
-        this.seg = await make('CPU');
-      }
-      this.state = 'ready';
-    })().catch((e) => {
-      this.state = 'error';
-      throw e;
-    });
+    this.ready = this.hub.load().then(
+      () => { this.state = 'ready'; },
+      (e) => { this.state = 'error'; throw e; },
+    );
     return this.ready;
   }
   update(video) {
-    if (this.state !== 'ready' || !video.videoWidth) return this.mask;
-    if (video.currentTime === this.lastTime) return this.mask;
-    this.lastTime = video.currentTime;
-    const w = 320;
-    const h = Math.max(2, Math.round((w * video.videoHeight) / video.videoWidth / 2) * 2);
-    if (this.small.width !== w || this.small.height !== h) {
-      this.small.width = w;
-      this.small.height = h;
+    if (this.state === 'ready') this.hub.request(video);
+    return this.mask;
+  }
+  ingest(data, w, h) {
+    if (!this.mask || this.mask.w !== w || this.mask.h !== h) {
       this.acc = new Float32Array(w * h);
+      for (let i = 0; i < data.length; i++) this.acc[i] = data[i];
       this.mask = { data: new Uint8Array(w * h), w, h };
     }
-    this.sctx.drawImage(video, 0, 0, w, h);
-    try {
-      this.seg.segmentForVideo(this.small, performance.now(), (res) => {
-        const masks = res.confidenceMasks;
-        if (!masks || !masks.length) return;
-        const conf = masks[masks.length - 1].getAsFloat32Array(); // ช่องสุดท้าย = ความมั่นใจว่าเป็น "คน"
-        const acc = this.acc;
-        const out = this.mask.data;
-        for (let i = 0; i < conf.length; i++) {
-          acc[i] = acc[i] * 0.45 + conf[i] * 0.55; // ลดขอบกะพริบระหว่างเฟรม
-          out[i] = acc[i] * 255;
-        }
-      });
-    } catch {}
-    return this.mask;
+    const acc = this.acc;
+    const out = this.mask.data;
+    for (let i = 0; i < data.length; i++) {
+      acc[i] = acc[i] * 0.4 + data[i] * 0.6; // ลดขอบกะพริบระหว่างเฟรม
+      out[i] = acc[i];
+    }
   }
 }
 

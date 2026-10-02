@@ -65,7 +65,11 @@ function encoderArgs(cfg) {
   return [
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '1',
     // โหมดดีเลย์ต่ำ: ไม่รอวิเคราะห์ input นาน (รูปแบบจากเบราว์เซอร์รู้อยู่แล้ว)
-    ...(latency === 'low' ? ['-fflags', '+genpts+nobuffer', '-flags', 'low_delay', '-probesize', '256k', '-analyzeduration', '500000'] : ['-fflags', '+genpts']),
+    // รูปแบบ input จากเบราว์เซอร์รู้อยู่แล้ว (WebM) → วิเคราะห์สั้น ๆ พอ
+    // (ค่าเริ่มต้น 5 วินาทีทำให้วิดีโอค้างสะสมตอนเริ่ม แล้ว FFmpeg ต้องเร่งส่งไล่ตาม = ข้อมูลที่ส่งไลฟ์ไม่สม่ำเสมอช่วงแรก)
+    ...(latency === 'low'
+      ? ['-fflags', '+genpts+nobuffer', '-flags', 'low_delay', '-probesize', '256k', '-analyzeduration', '500000']
+      : ['-fflags', '+genpts', '-probesize', '1M', '-analyzeduration', '1000000']),
     '-thread_queue_size', '1024', '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a:0',
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps}`,

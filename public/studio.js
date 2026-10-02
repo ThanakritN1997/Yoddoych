@@ -870,8 +870,20 @@ function restoreLayout(l) {
 const ticker = new Worker(URL.createObjectURL(new Blob([
   'let t; onmessage = (e) => { clearInterval(t); t = setInterval(() => postMessage(0), 1000 / e.data); };',
 ], { type: 'text/javascript' })));
-ticker.onmessage = draw;
-ticker.postMessage(30);
+// ถ้าเฟรมก่อนวาดช้า สัญญาณจาก Worker จะค้างคิว → ข้ามสัญญาณที่มาถี่เกิน แทนที่จะวาดรัว ๆ ติดกัน (ต้นเหตุภาพกระตุก)
+let tickFps = 30;
+let lastDrawAt = 0;
+ticker.onmessage = () => {
+  const now = performance.now();
+  if (now - lastDrawAt < (1000 / tickFps) * 0.6) return;
+  lastDrawAt = now;
+  draw();
+};
+function setTickFps(f) {
+  tickFps = f;
+  ticker.postMessage(f);
+}
+setTickFps(30);
 
 // ---------- แหล่งภาพ ----------
 function addSource(kind, stream) {
@@ -1860,12 +1872,13 @@ async function startLive() {
   for (const k of Object.keys(destPrev)) delete destPrev[k];
   $('alertStack').innerHTML = '';
 
-  ticker.postMessage(plan.fps);
+  setTickFps(plan.fps);
   const video = canvas.captureStream(plan.fps).getVideoTracks()[0];
   const stream = new MediaStream([video, mixOut.stream.getAudioTracks()[0]]);
   recorder = new MediaRecorder(stream, {
     mimeType: pickMime(),
-    videoBitsPerSecond: Math.max(8e6, plan.videoKbps * 2500), // ส่งภายในเครื่องแบบคุณภาพสูง แล้วค่อยบีบที่ FFmpeg
+    // ส่งภายในเครื่องแบบคุณภาพเผื่อไว้ ~1.6 เท่า แล้วค่อยบีบที่ FFmpeg (สูงเกินไปทำให้เบราว์เซอร์เข้ารหัสหนักโดยไม่จำเป็น)
+    videoBitsPerSecond: Math.max(5e6, plan.videoKbps * 1600),
     audioBitsPerSecond: 192000,
   });
   // ส่ง Blob ตรง ๆ: WebSocket รับประกันลำดับ (ถ้า await arrayBuffer() ก่อน ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)
@@ -1917,7 +1930,7 @@ function stopRecorder(reason) {
   lockSettings(false);
   showAdvice('');
   if (reason) toast(reason);
-  ticker.postMessage(30);
+  setTickFps(30);
 }
 
 function lockSettings(on) {
