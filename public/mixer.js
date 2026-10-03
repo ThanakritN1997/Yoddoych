@@ -4,10 +4,25 @@
 // เพลงพื้นหลัง ──────────────────────── ระดับ → ลดเสียงตอนพูด (ducking) → ปิดเสียง ┼→ รวม → ไลฟ์/ไฟล์อัด
 // เอฟเฟกต์เสียง ─────────────────────────────────────────────── ระดับ → ปิดเสียง ┘
 // เพลงและเอฟเฟกต์ส่งออกลำโพงด้วย (ปิดได้) · ไมค์และเสียงจอไม่ออกลำโพง (กันเสียงหอน)
-const actx = new AudioContext();
+// latencyHint 'playback' = บัฟเฟอร์เสียงใหญ่ขึ้น → ตอนเครื่องทำงานหนัก (เกม + ไลฟ์) เสียงไม่กระตุก/ไม่แตก
+// 48 kHz ตรงกับที่ส่งไลฟ์ ไม่ต้องแปลงอัตราสุ่มซ้ำ
+let actx;
+try {
+  actx = new AudioContext({ latencyHint: 'playback', sampleRate: 48000 });
+} catch {
+  actx = new AudioContext({ latencyHint: 'playback' });
+}
 const mixOut = actx.createMediaStreamDestination(); // มีแทร็กเสียงเสมอ (เงียบถ้าไม่มีแหล่ง) เพราะแพลตฟอร์มส่วนใหญ่ต้องการเสียง
 const bus = actx.createGain();
-bus.connect(mixOut);
+// ตัวกันเสียงแตก (limiter): เสียงรวมดังเกิน → กดลงนุ่ม ๆ แทนที่จะแตกตอนเกินระดับสูงสุด
+const limiter = actx.createDynamicsCompressor();
+limiter.threshold.value = -3;
+limiter.knee.value = 0;
+limiter.ratio.value = 20;
+limiter.attack.value = 0.002;
+limiter.release.value = 0.1;
+bus.connect(limiter);
+limiter.connect(mixOut);
 const monitorBus = actx.createGain();
 monitorBus.connect(actx.destination);
 
@@ -45,7 +60,7 @@ const CH = { mic: channel('mic'), screen: channel('screen'), music: channel('mus
 CH.music.mute.connect(monitorBus);
 CH.sfx.mute.connect(monitorBus);
 const masterAn = makeAnalyser();
-bus.connect(masterAn);
+limiter.connect(masterAn);
 
 // ไมค์: ตัดเสียงต่ำ (เสียงพัดลม/แอร์/กระแทกโต๊ะ) → gate → compressor
 const micHp = actx.createBiquadFilter();
