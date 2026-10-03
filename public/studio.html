@@ -470,6 +470,34 @@
 
       <!-- ===== ปลายทาง ===== -->
       <div class="tabpanel" data-panel="dest" hidden>
+        <section class="card rs-card">
+          <h2>Restream <span class="tag">ไลฟ์ TikTok จาก Yoddoy</span></h2>
+          <p class="muted small">เชื่อมครั้งเดียว → Yoddoy ใส่คีย์ให้เอง · เปิด/ปิดช่อง TikTok · ตั้งชื่อไลฟ์ · กด <b>เริ่มไลฟ์</b>/<b>หยุดไลฟ์</b> ที่ Yoddoy = TikTok เริ่ม/หยุดตาม</p>
+          <button id="rsConnect" class="btn primary small">🔗 เชื่อมต่อ Restream</button>
+          <div id="rsBox" hidden>
+            <div class="field">ช่องใน Restream <span class="muted small">(ติ๊ก = ไลฟ์ไปช่องนั้นด้วย)</span></div>
+            <div id="rsChannels" class="rs-channels"></div>
+            <label class="field">ชื่อไลฟ์
+              <input id="rsTitle" type="text" maxlength="140" placeholder="เช่น ไลฟ์เกม Enchanted Wilds ไต่แรงค์ 🔥" autocomplete="off">
+            </label>
+            <div class="row">
+              <button id="rsTitleSave" class="btn small">✏️ อัปเดตชื่อไลฟ์</button>
+              <button id="rsRefresh" class="btn small">↻ โหลดใหม่</button>
+              <button id="rsDisconnectBtn" class="btn small danger-text">ยกเลิกการเชื่อมต่อ</button>
+            </div>
+          </div>
+          <p id="rsStatus" class="muted small face-status"></p>
+          <details id="rsSetup" class="sub-box web-box">
+            <summary>ตั้งค่าครั้งแรก (เจ้าของเว็บทำครั้งเดียว)</summary>
+            <ol class="steps small">
+              <li><b>developers.restream.io</b> → ล็อกอิน → <b>Applications</b> → สร้างแอป “Yoddoy Studio”</li>
+              <li>Redirect URI: <code>https://yoddoych.vercel.app/oauth/restream/callback</code></li>
+              <li>สิทธิ์ (scopes): <code>profile.read</code> <code>channels.read</code> <code>channels.write</code> <code>stream.read</code></li>
+              <li><b>Vercel</b> → โปรเจกต์ Yoddoych → Settings → Environment Variables → เพิ่ม <code>RESTREAM_CLIENT_ID</code> และ <code>RESTREAM_CLIENT_SECRET</code> → Redeploy</li>
+            </ol>
+          </details>
+        </section>
+
         <section class="card">
           <h2>ปลายทางไลฟ์</h2>
           <div id="destList" class="dest-list"></div>
@@ -599,6 +627,7 @@
   <script src="studio.js"></script>
   <script src="mixer.js"></script>
   <script src="scenes.js"></script>
+  <script src="restream.js"></script>
   <script src="mirror-control.js"></script>
 </body>
 </html>

@@ -395,3 +395,11 @@ body.studio-page {
   .rec-btn span { display: none; }
   .rec-badge { display: none !important; }
 }
+
+/* ---------- Restream ---------- */
+.rs-channels { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.rs-ch { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #0f1219; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: 14px; }
+.rs-ch input { width: auto; flex: none; }
+.rs-ch.on { border-color: var(--ok); }
+.rs-ch .rs-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rs-card code { font-size: 12px; background: #0e1117; border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 5px; word-break: break-all; }

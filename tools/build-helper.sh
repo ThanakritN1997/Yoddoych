@@ -26,7 +26,7 @@ for f in "$OUT"/bin/*.exe "$OUT"/lib/gstreamer-1.0/*.dll "$OUT"/libexec/gstreame
 done | sort -u | while read -r dll; do cp -n "$dll" "$OUT/bin/"; done
 
 # โค้ดเซิร์ฟเวอร์ + หน้าเว็บ (ใช้ในเครื่องได้ด้วย)
-cp "$ROOT"/{server.js,studio-server.js,mirror-server.js,package.json} "$OUT/app/"
+cp "$ROOT"/{server.js,studio-server.js,mirror-server.js,restream-oauth.js,package.json} "$OUT/app/"
 cp -r "$ROOT/public" "$OUT/app/"
 mkdir -p "$OUT/app/node_modules"
 cp -r "$ROOT/node_modules/ws" "$OUT/app/node_modules/"

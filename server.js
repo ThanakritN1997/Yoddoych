@@ -50,7 +50,11 @@ function cors(req, res) {
   res.setHeader('Access-Control-Allow-Private-Network', 'true'); // Chrome: เว็บ https เรียก localhost
 }
 
+// เชื่อม Restream: ต้องมี origin ที่อนุญาตเสมอ (ไม่ใช่แค่ "ไม่มี origin")
+const restreamOAuth = require('./restream-oauth').create((o) => !!o && originAllowed(o));
+
 const server = http.createServer(async (req, res) => {
+  if (req.url.startsWith('/oauth/restream/')) return restreamOAuth(req, res);
   if (req.url.startsWith('/api/')) {
     if (!isLocal(req)) return res.writeHead(403).end();
     cors(req, res);
