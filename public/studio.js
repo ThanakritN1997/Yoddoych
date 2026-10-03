@@ -244,8 +244,11 @@ function contentAspect(l) {
 
 // เต็มจออัตโนมัติ: จอแนวตั้งในกรอบแนวตั้ง (เช่น iPhone 19.5:9 ใน 9:16) → "เต็มกรอบ" ไม่มีขอบดำ
 // อื่น ๆ → "พอดีจอ" เห็นภาพครบ
+// ค่าเริ่มต้น: ตัดแค่แถบชื่อหน้าต่าง เห็นภาพครบทุกส่วน · ติ๊ก "ตัดขอบดำ + ขยายเต็มกรอบอัตโนมัติ" ถ้าอยากให้ตัดเพิ่ม
+const autoTrim = () => store.get('autoTrim', false);
 function autoFull(l) {
   if (l.userFit) return l.userFit; // ผู้ใช้กดเลือกเองแล้ว → ไม่เปลี่ยนให้
+  if (!autoTrim()) return 'full';
   const portraitCanvas = canvas.height > canvas.width;
   return l.kind === 'screen' && portraitCanvas && contentAspect(l) < 1 ? 'fill' : 'full';
 }
@@ -854,6 +857,23 @@ $('cropTop').oninput = () => {
   $('cropTopLabel').textContent = selected.crop.t + ' px';
 };
 $('cropAuto').onclick = () => selected && autoCrop(selected);
+
+// ตัดแค่แถบชื่อหน้าต่างด้านบน (เฉพาะตอนแชร์แบบ "หน้าต่าง") ไม่แตะส่วนอื่นของภาพ
+function cropTitleBar(l) {
+  const t = isCapture(l) && l.surface === 'window' ? titleBarPx() : 0;
+  setCrop(l, { t, b: 0, l: 0, r: 0 });
+  renderLayerPanel();
+}
+$('cropTitle').onclick = () => selected && cropTitleBar(selected);
+$('autoTrim').checked = autoTrim();
+$('autoTrim').onchange = () => {
+  store.set('autoTrim', $('autoTrim').checked);
+  const l = getLayer('screen');
+  if (!hasContent(l)) return;
+  if ($('autoTrim').checked) autoCrop(l);
+  else cropTitleBar(l);
+  if (!l.userFit) applyPreset(l, autoFull(l));
+};
 $('cropReset').onclick = () => { if (selected) { setCrop(selected, { t: 0, b: 0, l: 0, r: 0 }); renderLayerPanel(); } };
 
 // ---------- จำการจัดวาง ----------
@@ -913,7 +933,7 @@ function addSource(kind, stream) {
     // ภาพจอที่เคยตั้งเต็มจอ → เลือกแบบเต็มกรอบ/พอดีจอให้ตามแนวภาพตอนนี้
     if (!restored || (kind === 'screen' && ['full', 'fill'].includes(l.preset))) applyPreset(l, kind === 'cam' ? (hasOther ? 'br' : 'full') : autoFull(l));
     sceneApplyLayer(l, true);
-    if (kind === 'screen') setTimeout(() => autoCropWhenReady(l, stream), 500); // ตัดหัวหน้าต่าง + ขอบดำให้อัตโนมัติ
+    if (kind === 'screen') setTimeout(() => (autoTrim() ? autoCropWhenReady(l, stream) : cropTitleBar(l)), 500);
     if (kind === 'cam') {
       if (!l.frame || l.frame === 'none') l.frame = store.get('camFrame', 'none');
       renderFrames();

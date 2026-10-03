@@ -44,7 +44,10 @@ function sceneCapture() {
 
 function applyEntry(l, e) {
   for (const k of SNAP_KEYS) if (e[k] !== null && e[k] !== undefined) l[k] = e[k];
-  if (l.preset && hasContent(l) && (l.kind === 'image' || l.video?.videoWidth)) applyPreset(l, l.preset);
+  if (!l.preset || !hasContent(l) || !(l.kind === 'image' || l.video?.videoWidth)) return;
+  // จอที่ตั้งเต็มจอไว้แบบอัตโนมัติ → ใช้ค่าอัตโนมัติตอนนี้ (เช่นปิด "ขยายเต็มกรอบ" แล้ว)
+  if (l.kind === 'screen' && ['full', 'fill'].includes(l.preset) && !l.userFit) applyPreset(l, autoFull(l));
+  else applyPreset(l, l.preset);
 }
 
 // ใช้ฉากกับเลเยอร์เดียว (ตอนเปิดกล้อง/จอ หรือโหลดรูปกลับมา)
