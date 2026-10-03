@@ -350,8 +350,8 @@ const FACE_KEYS = BEAUTY_GROUPS.flatMap((g) => g.items).filter((i) => i.face).ma
 // สไตล์สำเร็จรูป (ค่าที่ไม่ได้ระบุ = 0)
 const BEAUTY_STYLES = {
   natural: { name: 'ธรรมชาติ', v: { smooth: 40, foundation: 20, glow: 15, slim: 15, eyeSize: 10, teeth: 20, underEye: 30 } },
-  sweet: { name: 'หวานใส', v: { smooth: 55, foundation: 35, glow: 25, slim: 30, vshape: 20, eyeSize: 25, noseNarrow: 20, lip: 35, blush: 35, teeth: 30, eyeBright: 30, underEye: 40 } },
-  korean: { name: 'เกาหลี', v: { smooth: 60, foundation: 45, glow: 28, slim: 35, vshape: 30, small: 15, eyeSize: 20, noseNarrow: 25, lip: 25, blush: 20, underEye: 50, highlight: 30 } },
+  sweet: { name: 'หวานใส', v: { smooth: 55, foundation: 35, glow: 25, slim: 30, vshape: 20, eyeSize: 25, noseNarrow: 20, lip: 35, teeth: 30, eyeBright: 30, underEye: 40 } },
+  korean: { name: 'เกาหลี', v: { smooth: 60, foundation: 45, glow: 28, slim: 35, vshape: 30, small: 15, eyeSize: 20, noseNarrow: 25, lip: 25, underEye: 50, highlight: 30 } },
   sharp: { name: 'หล่อคม', v: { smooth: 35, foundation: 15, jaw: 20, contour: 40, highlight: 25, noseNarrow: 15, eyeBright: 25, teeth: 25, underEye: 35 } },
 };
 

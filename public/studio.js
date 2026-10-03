@@ -1278,6 +1278,12 @@ syncFxUi();
 // ---------- บิวตี้ใบหน้า (แบบแผงของ TikTok LIVE Studio) ----------
 const faceTracker = new FaceTracker();
 const faceCfg = Object.assign({ sticker: '', lipColor: LIP_COLORS[0], blushColor: BLUSH_COLORS[0] }, store.get('face', {}));
+// ปิดบลัชออน (แก้มชมพู) ที่ติดมาจากสไตล์เดิมครั้งเดียว — ยังเปิดเองได้ที่ บิวตี้ → แต่งหน้า → บลัชออน
+if (!store.get('blushOff1', false)) {
+  faceCfg.blush = 0;
+  store.set('face', faceCfg);
+  store.set('blushOff1', true);
+}
 // ผิวเนียน/ผิวสว่างเก็บใน fx.params (ใช้ได้โดยไม่ต้องจับใบหน้า) — ค่าเก่า 0–1 แปลงเป็น 0–100
 const beautyGet = (item) => (item.fx ? Math.round((fx.params[item.key] || 0) * 100) : faceCfg[item.key] || 0);
 function beautySet(item, val) {
