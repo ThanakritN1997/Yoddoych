@@ -11,7 +11,7 @@ const PLATFORMS = {
   kick: { name: 'Kick', url: 'rtmps://fa723fc1b171.global-contribute.live-video.net:443/app', max: 8000, orient: 'h', help: 'Kick → Dashboard → Settings → Stream URL & Key (ตรวจ URL ให้ตรงกับหน้า Kick)' },
   x: { name: 'X (Twitter)', url: '', max: 9000, orient: 'h', help: 'X Media Studio → Producer → Sources → สร้าง RTMP source' },
   shopee: { name: 'Shopee / Lazada Live', url: '', max: 4000, orient: 'v', help: 'ถ้าร้านได้สิทธิ์ไลฟ์ผ่าน OBS/RTMP ให้คัดลอก Push URL และ Key จากหน้าผู้ขาย' },
-  restream: { name: 'Restream', url: 'rtmp://live.restream.io/live', max: 8000, help: 'restream.io → Stream with RTMP (OBS/Streaming software) → คัดลอก Stream Key · ใช้ส่งต่อไปช่องที่ต่อไว้ใน Restream เช่น TikTok (บัญชี TikTok ต้องได้รับอนุมัติจาก TikTok ก่อน)' },
+  restream: { name: 'Restream → TikTok ฯลฯ', url: 'rtmp://live.restream.io/live', max: 6000, orient: 'v', help: 'restream.io → Stream with RTMP (OBS/Streaming software) → คัดลอก Stream Key · ใช้ส่งต่อไปช่องที่ต่อไว้ใน Restream เช่น TikTok (บัญชี TikTok ต้องได้รับอนุมัติจาก TikTok ก่อน)' },
   custom: { name: 'RTMP อื่น ๆ', url: '', max: 20000, help: 'ใส่ Server URL (rtmp:// หรือ rtmps://) และ Stream Key' },
 };
 
