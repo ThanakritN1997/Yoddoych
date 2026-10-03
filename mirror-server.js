@@ -74,6 +74,7 @@ function start() {
     windowsHide: false, // หน้าต่างภาพ iPhone ต้องแสดง เพื่อให้เลือกแชร์หน้าต่างได้
   });
   proc = p;
+  try { os.setPriority(p.pid, os.constants.priority.PRIORITY_ABOVE_NORMAL); } catch {} // ภาพ iPhone ไม่กระตุกตอนเครื่องทำงานหนัก
   let buf = '';
   const read = (chunk) => {
     buf += chunk.toString();

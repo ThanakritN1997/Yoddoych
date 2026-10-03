@@ -115,6 +115,12 @@ function recFileName(d = new Date()) {
   return `Yoddoy-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.mp4`;
 }
 
+// ให้ตัวเข้ารหัส/ตัวส่ง/ตัวอัดได้ซีพียูก่อนโปรแกรมทั่วไป (เช่นเกม) → ภาพไม่กระตุกตอนเครื่องทำงานหนัก
+function boost(proc) {
+  try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_ABOVE_NORMAL); } catch {}
+  return proc;
+}
+
 function joinUrl(url, key) {
   url = String(url || '').trim();
   key = String(key || '').trim();
@@ -213,7 +219,7 @@ function attach() {
       r.state = r.connects ? 'reconnecting' : 'connecting';
       r.connects++;
       r.bytes = 0;
-      const proc = spawn(FFMPEG, relayArgs(r.target), { windowsHide: true });
+      const proc = boost(spawn(FFMPEG, relayArgs(r.target), { windowsHide: true }));
       r.proc = proc;
       r.startedAt = Date.now();
       proc.stdin.on('error', () => {});
@@ -264,7 +270,7 @@ function attach() {
         return send({ type: 'error', message: 'สร้างโฟลเดอร์เก็บไฟล์ไม่ได้: ' + e.message });
       }
       const file = path.join(REC_DIR, recFileName());
-      const proc = spawn(FFMPEG, recordArgs(file), { windowsHide: true });
+      const proc = boost(spawn(FFMPEG, recordArgs(file), { windowsHide: true }));
       const rec = { proc, file, bytes: 0, startedAt: Date.now() };
       s.rec = rec;
       proc.stdin.on('error', () => {});
@@ -326,7 +332,7 @@ function attach() {
         };
         s.publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1) }));
 
-        s.encoder = spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true });
+        s.encoder = boost(spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true }));
         session = s;
         s.encoder.stdin.on('error', () => {});
 
@@ -369,7 +375,7 @@ function attach() {
         });
         s.encoder.on('exit', (code) => {
           if (session !== s) return;
-          stop(code === 0 ? 'จบการไลฟ์' : `ตัวเข้ารหัสหยุดทำงาน (code ${code}) — กดเริ่มไลฟ์ใหม่`);
+          stop(code === 0 ? 'จบการไลฟ์' : `ตัวเข้ารหัสหยุดทำงาน (code ${code})`);
         });
         s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
 

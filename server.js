@@ -189,6 +189,17 @@ setInterval(() => {
   }
 }, 30000);
 
+// ข้อผิดพลาดที่ไม่คาดคิด: บันทึกไว้แต่ไม่ปิดโปรแกรม (Helper ดับกลางไลฟ์ = ไลฟ์หลุดทุกช่อง)
+process.on('uncaughtException', (e) => console.error('[ข้อผิดพลาด]', e && e.stack ? e.stack : e));
+process.on('unhandledRejection', (e) => console.error('[ข้อผิดพลาด]', e && e.stack ? e.stack : e));
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nYoddoy Helper เปิดอยู่แล้ว (พอร์ต ${PORT} ถูกใช้) — ใช้ตัวที่เปิดอยู่ได้เลย ปิดหน้าต่างนี้ได้\n`);
+    process.exit(1);
+  }
+  console.error('[ข้อผิดพลาด]', e);
+});
+
 server.listen(PORT, process.env.HELPER ? '127.0.0.1' : undefined, () => {
   if (process.env.HELPER) {
     console.log(`\nYoddoy Helper ${VERSION} ทำงานแล้ว — เปิดหน้าต่างนี้ทิ้งไว้ระหว่างใช้งาน`);

@@ -421,6 +421,7 @@ const SHOUT_TYPES = {
   share: { emoji: '🔁', text: (n) => `ขอบคุณ ${n} ที่แชร์ไลฟ์!`, c1: '#06b6d4', c2: '#3b82f6' },
   member: { emoji: '⭐', text: (n) => `ยินดีต้อนรับสมาชิกใหม่ ${n}!`, c1: '#eab308', c2: '#a855f7' },
   donate: { emoji: '💸', text: (n) => `ขอบคุณ ${n} สำหรับโดเนท!`, c1: '#22c55e', c2: '#14b8a6' },
+  cta: { emoji: '👆', text: (n) => n, c1: '#ff4d8d', c2: '#7c5cff' }, // ชวนกดติดตาม/แชร์ (ข้อความเต็มจากผู้ใช้)
 };
 const shoutQueue = [];
 let shoutNow = null;
@@ -1612,6 +1613,13 @@ let liveStart = 0;
 let recStart = 0;
 let clock = null;
 let slowSince = 0;
+// กู้ไลฟ์อัตโนมัติ: ผู้ใช้ยังตั้งใจไลฟ์/อัดอยู่ แต่ระบบหลุด (Helper ปิด/ค้าง, ตัวเข้ารหัสดับ, เบราว์เซอร์หยุดบันทึก)
+let wantLive = false;
+let wantRec = false;
+let lastDests = [];
+let resumeTimer = null;
+let resumeTries = 0;
+let wakeLock = null;
 
 function connect() {
   ws = new WebSocket(H.ws + '/studio');
@@ -1620,7 +1628,7 @@ function connect() {
   ws.onclose = () => {
     $('conn').textContent = 'ไม่ได้เชื่อมต่อ';
     $('conn').classList.remove('on');
-    if (recorder) stopPipeline('การเชื่อมต่อกับเซิร์ฟเวอร์หลุด');
+    if (recorder) stopPipeline('การเชื่อมต่อกับ Yoddoy Helper หลุด', { resume: true });
     setTimeout(connect, 2000);
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
@@ -1630,7 +1638,10 @@ function handle(m) {
   switch (m.type) {
     case 'started':
       sessionUp = true;
-      if (m.live) toast('เริ่มไลฟ์แล้ว');
+      if (resumeTries) {
+        liveAlert('ok', '🟢 กู้ไลฟ์กลับมาแล้ว', `ระบบเริ่มส่งใหม่ให้อัตโนมัติ (ครั้งที่ ${resumeTries})`, 'all');
+        resumeTries = 0;
+      } else if (m.live) toast('เริ่มไลฟ์แล้ว');
       renderChips(m.dests);
       break;
     case 'live':
@@ -1684,8 +1695,8 @@ function handle(m) {
       break;
     case 'stopped':
       // หยุดเองไม่ต้องเตือน · หยุดเพราะปัญหา (ตัวเข้ารหัสดับ ฯลฯ) = เตือนแรง
-      if (recorder && !userStopping && (isLive || isRec)) liveAlert('danger', isLive ? '⛔ ไลฟ์หยุดทั้งหมด' : '⛔ อัดไฟล์หยุด', m.reason || 'ตัวส่งไลฟ์หยุดทำงาน — กดเริ่มใหม่', 'all');
-      stopPipeline(userStopping ? '' : m.reason);
+      if (recorder && !userStopping && (isLive || isRec)) liveAlert('danger', isLive ? '⛔ ไลฟ์สะดุด' : '⛔ อัดไฟล์สะดุด', (m.reason || 'ตัวส่งไลฟ์หยุดทำงาน') + ' — กำลังกู้ให้อัตโนมัติ…', 'all');
+      stopPipeline(userStopping ? '' : m.reason, { resume: !userStopping });
       break;
   }
 }
@@ -1907,8 +1918,11 @@ async function startPipeline({ destinations, record }) {
   };
   recorder.onerror = (e) => {
     appendLog('MediaRecorder error: ' + ((e.error && e.error.message) || 'unknown'));
-    toast('เบราว์เซอร์หยุดบันทึกภาพ — กดเริ่มใหม่');
+    // เบราว์เซอร์หยุดบันทึกภาพ → ปิดรอบนี้แล้วเริ่มใหม่อัตโนมัติ
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+    stopPipeline('เบราว์เซอร์หยุดบันทึกภาพ', { resume: true });
   };
+  keepAwake(true);
   ws.send(JSON.stringify({
     type: 'start',
     width: plan.width, height: plan.height, fps: plan.fps,
@@ -1937,13 +1951,16 @@ function beginLiveUi() {
 async function startLive() {
   const list = liveDestinations();
   if (!list || !helperReady()) return;
+  cancelResume();
   beginLiveUi();
+  wantLive = true;
+  lastDests = list;
   if (recorder) {
     // กำลังอัดอยู่ → เริ่มไลฟ์ต่อจากภาพเดิม ไม่ต้องเริ่มใหม่
     ws.send(JSON.stringify({ type: 'golive', destinations: list, delaySec: delaySec() }));
   } else {
     const record = $('recWithLive').checked && recSupported();
-    if (record) { isRec = true; recStart = Date.now(); }
+    if (record) { isRec = true; wantRec = true; recStart = Date.now(); }
     await startPipeline({ destinations: list, record });
   }
   updateOutputUi();
@@ -1951,6 +1968,7 @@ async function startLive() {
 
 function stopLive() {
   userStopping = true;
+  wantLive = false;
   $('alertStack').innerHTML = '';
   if (isRec) {
     // อัดไฟล์อยู่ → หยุดแค่ไลฟ์ อัดต่อ
@@ -1962,6 +1980,7 @@ function stopLive() {
     userStopping = false;
     return;
   }
+  wantRec = false;
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
   stopPipeline('หยุดไลฟ์แล้ว');
 }
@@ -1974,7 +1993,9 @@ async function startRec() {
     $('helperDesktop').hidden = true;
     return toast('การอัดไฟล์ต้องใช้ Yoddoy Helper 1.5.0 ขึ้นไป — ดาวน์โหลดเวอร์ชันใหม่ด้านบน');
   }
+  cancelResume();
   isRec = true;
+  wantRec = true;
   recStart = Date.now();
   if (recorder) ws.send(JSON.stringify({ type: 'record', on: true }));
   else {
@@ -1985,6 +2006,7 @@ async function startRec() {
 }
 
 function stopRec() {
+  wantRec = false;
   if (!recorder) return;
   if (isLive) {
     ws.send(JSON.stringify({ type: 'record', on: false }));
@@ -1993,23 +2015,77 @@ function stopRec() {
     return;
   }
   userStopping = true;
+  wantLive = false;
   ws.send(JSON.stringify({ type: 'stop' }));
   stopPipeline('');
 }
 
-function stopPipeline(reason) {
+// opts.resume = หลุดเพราะระบบ (ไม่ใช่ผู้ใช้กดหยุด) → ลองเริ่มใหม่อัตโนมัติ
+function stopPipeline(reason, opts = {}) {
   const was = !!recorder;
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  if (recorder && recorder.state !== 'inactive') {
+    recorder.ondataavailable = null;
+    recorder.onerror = null;
+    try { recorder.stop(); } catch {}
+  }
   recorder = null;
   isLive = false;
   isRec = false;
   sessionUp = false;
   clearInterval(clock);
-  updateOutputUi();
   showAdvice('');
-  if (reason && was) toast(reason);
   setTickFps(30);
+  if (opts.resume && was && (wantLive || wantRec)) {
+    scheduleResume(reason);
+  } else {
+    wantLive = wantRec = false;
+    keepAwake(false);
+    if (reason && was) toast(reason);
+  }
+  updateOutputUi();
 }
+
+function scheduleResume(reason) {
+  clearTimeout(resumeTimer);
+  resumeTries++;
+  const wait = Math.min(10, 1 + resumeTries * 2); // 3, 5, 7, 9, 10, 10… วินาที
+  appendLog(`กู้ไลฟ์อัตโนมัติใน ${wait} วินาที (ครั้งที่ ${resumeTries})${reason ? ' — สาเหตุ: ' + reason : ''}`);
+  resumeTimer = setTimeout(tryResume, wait * 1000);
+  updateOutputUi();
+}
+async function tryResume() {
+  resumeTimer = null;
+  if (!wantLive && !wantRec) return;
+  // รอ Helper กลับมา (เชื่อมต่อใหม่เองทุก 2 วินาทีใน connect())
+  if (!H || !ws || ws.readyState !== WebSocket.OPEN) return scheduleResume('ยังต่อ Yoddoy Helper ไม่ได้');
+  userStopping = false;
+  for (const k of Object.keys(destPrev)) delete destPrev[k];
+  isLive = wantLive;
+  isRec = wantRec;
+  await startPipeline({ destinations: wantLive ? lastDests : [], record: wantRec && recSupported() });
+  updateOutputUi();
+}
+function cancelResume() {
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  resumeTries = 0;
+}
+
+// กันคอมพักหน้าจอ/จอดับระหว่างไลฟ์ (จอดับแล้วเบราว์เซอร์อาจหยุดวาดภาพ)
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && 'wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => (wakeLock = null));
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && recorder) keepAwake(true); // ล็อกถูกปล่อยเมื่อสลับแท็บ → ขอใหม่
+});
 
 function updateClock() {
   $('liveTime').textContent = hhmmss(Date.now() - liveStart);
@@ -2017,10 +2093,11 @@ function updateClock() {
 }
 
 function updateOutputUi() {
+  const resuming = !!resumeTimer;
   $('liveBadge').hidden = !isLive;
   $('recBadge').hidden = !isRec;
-  $('btnLive').textContent = isLive ? 'หยุดไลฟ์' : 'เริ่มไลฟ์';
-  $('btnLive').classList.toggle('live', isLive);
+  $('btnLive').textContent = resuming ? 'กำลังกู้ไลฟ์… (กดเพื่อยกเลิก)' : isLive ? 'หยุดไลฟ์' : 'เริ่มไลฟ์';
+  $('btnLive').classList.toggle('live', isLive || resuming);
   $('btnRec').classList.toggle('on', isRec);
   $('btnRec').title = isRec ? 'หยุดอัดไฟล์' : 'อัดไฟล์ MP4 (ไม่ต้องไลฟ์ก็ได้)';
   $('btnRec').setAttribute('aria-label', $('btnRec').title);
@@ -2070,11 +2147,61 @@ function openRecFolder(name) {
 }
 $('recOpen').onclick = () => openRecFolder('');
 
-$('btnLive').onclick = () => (isLive ? stopLive() : startLive());
+$('btnLive').onclick = () => {
+  if (resumeTimer) { // ยกเลิกการกู้ไลฟ์
+    cancelResume();
+    wantLive = wantRec = false;
+    keepAwake(false);
+    updateOutputUi();
+    return toast('ยกเลิกการกู้ไลฟ์แล้ว');
+  }
+  return isLive ? stopLive() : startLive();
+};
 $('btnRec').onclick = () => (isRec ? stopRec() : startRec());
 
+// ---------- ชวนกดติดตาม/แชร์อัตโนมัติ ----------
+// คนดูกดติดตาม/แชร์/คอมเมนต์มาก = แพลตฟอร์มดันไลฟ์ไปหน้าฟีดมากขึ้น → เตือนคนดูเป็นระยะ ๆ
+const CTA_DEFAULT = 'กดติดตาม ❤️ กดแชร์ 🔁 ให้ไลฟ์ไปถึงเพื่อน ๆ';
+const cta = Object.assign({ on: false, every: 10, text: CTA_DEFAULT }, store.get('cta', {}));
+let ctaLast = 0;
+$('ctaText').value = cta.text;
+$('ctaOn').checked = cta.on;
+$('ctaEvery').value = String(cta.every);
+const saveCta = () => store.set('cta', cta);
+$('ctaText').onchange = () => { cta.text = $('ctaText').value.trim() || CTA_DEFAULT; $('ctaText').value = cta.text; saveCta(); };
+$('ctaOn').onchange = () => { cta.on = $('ctaOn').checked; ctaLast = Date.now(); saveCta(); };
+$('ctaEvery').onchange = () => { cta.every = +$('ctaEvery').value; saveCta(); };
+$('ctaNow').onclick = () => { queueShout(cta.text, 'cta'); ctaLast = Date.now(); };
+setInterval(() => {
+  if (!cta.on || !isLive) return;
+  // ครั้งแรกหลังเริ่มไลฟ์ 3 นาที (รอคนเข้า) จากนั้นตามรอบที่ตั้ง
+  const since = Date.now() - Math.max(ctaLast, liveStart - (cta.every - 3) * 60000);
+  if (since >= cta.every * 60000) {
+    queueShout(cta.text, 'cta');
+    ctaLast = Date.now();
+  }
+}, 5000);
+
+// ---------- มาร์คช็อตเด็ด ----------
+const marks = [];
+function addMark() {
+  if (!isLive && !isRec) return toast('มาร์คได้ระหว่างไลฟ์หรืออัดไฟล์');
+  const at = Date.now();
+  marks.unshift({ at, rec: isRec ? hhmmss(at - recStart) : '', live: isLive ? hhmmss(at - liveStart) : '' });
+  renderMarks();
+  toast('⭐ มาร์คแล้ว' + (isRec ? ` — นาทีที่ ${marks[0].rec} ในไฟล์อัด` : ''));
+}
+function renderMarks() {
+  $('markList').innerHTML = marks.slice(0, 20).map((m) => `<div class="rec-row"><span class="rec-name">⭐ ${new Date(m.at).toLocaleTimeString('th-TH')}</span><span class="muted small">${m.rec ? 'ไฟล์อัด ' + m.rec : ''}${m.rec && m.live ? ' · ' : ''}${m.live ? 'ไลฟ์ ' + m.live : ''}</span></div>`).join('');
+}
+$('markBtn').onclick = addMark;
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'h' && e.key !== 'H') || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  addMark();
+});
+
 window.addEventListener('beforeunload', (e) => {
-  if (recorder) e.preventDefault();
+  if (recorder || resumeTimer) e.preventDefault();
 });
 
 renderDests();

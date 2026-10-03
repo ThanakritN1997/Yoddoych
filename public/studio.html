@@ -294,6 +294,20 @@
             <button id="shoutGo" class="btn primary small">✨ ขึ้นจอ</button>
             <span class="muted small">กด Enter ในช่องชื่อได้ · ขึ้นจอ 6 วินาที</span>
           </div>
+          <div class="sub-box">
+            <div class="sub-title">ชวนกดติดตาม/แชร์อัตโนมัติ <span class="tag">ช่วยการมองเห็น</span></div>
+            <input id="ctaText" type="text" maxlength="60" autocomplete="off" aria-label="ข้อความชวน">
+            <div class="row">
+              <label class="check small"><input id="ctaOn" type="checkbox"> ขึ้นจอเองระหว่างไลฟ์ ทุก</label>
+              <select id="ctaEvery" class="mini-select" aria-label="ทุกกี่นาที">
+                <option value="5">5 นาที</option>
+                <option value="10">10 นาที</option>
+                <option value="15">15 นาที</option>
+                <option value="20">20 นาที</option>
+              </select>
+              <button id="ctaNow" class="btn small">ขึ้นจอตอนนี้</button>
+            </div>
+          </div>
           <details class="sub-box web-box">
             <summary>แจ้งเตือนคนกดติดตาม/ของขวัญแบบอัตโนมัติ</summary>
             <p class="muted small">แพลตฟอร์มไม่ส่งรายชื่อคนกดติดตามให้เว็บทั่วไปแบบสด ๆ — ใช้ลิงก์ <b>Alert Box</b> ของบริการเหล่านี้ใน “แปะ URL” (ตั้งพื้นหลังเป็นสีเขียว แล้วลบพื้นหลังสี):</p>
@@ -528,6 +542,11 @@
           <p class="muted small">กดปุ่ม <b>⏺ อัด</b> แถบบนเพื่ออัดอย่างเดียว (ไม่ไลฟ์) หรืออัดไปพร้อมไลฟ์ — ได้ไฟล์ความละเอียดเดียวกับที่ไลฟ์ ไว้ตัดคลิปลง TikTok/Reels/Shorts</p>
           <label class="check small"><input id="recWithLive" type="checkbox"> อัดไฟล์อัตโนมัติทุกครั้งที่เริ่มไลฟ์</label>
           <p id="recNow" class="rec-now small" hidden>⏺ กำลังอัด <b id="recFileNow"></b> · <span id="recSize"></span></p>
+          <div class="row">
+            <button id="markBtn" class="btn small">⭐ มาร์คช็อตเด็ด <kbd>H</kbd></button>
+            <span class="muted small">กดตอนมีช่วงเด็ด จะจดเวลาไว้ให้ตัดเป็นคลิปสั้นทีหลัง</span>
+          </div>
+          <div id="markList" class="rec-list"></div>
           <div id="recList" class="rec-list"></div>
           <div class="row">
             <button id="recOpen" class="btn small">📂 เปิดโฟลเดอร์</button>
