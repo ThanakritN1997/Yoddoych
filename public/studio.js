@@ -140,9 +140,10 @@ function calc() {
 
 // ---------- ดีเลย์ ----------
 // เวลาที่ส่งชิ้นวิดีโอจากเบราว์เซอร์ (ms) — ยิ่งสั้นยิ่งหน่วงน้อย
-const RECORDER_SLICE = { low: 100, normal: 250, stable: 500 };
+// วัดจริง (1080p60 NVENC): ต่ำสุด 40ms ≈ 0.21 วิ · สมดุล ≈ 0.55–0.65 วิ (ช้าที่ตัวเข้ารหัส ไม่ใช่ขนาดชิ้น)
+const RECORDER_SLICE = { low: 40, normal: 250, stable: 500 };
 // ดีเลย์ของโปรแกรมเราโดยประมาณ (วินาที) — ไม่รวมดีเลย์ของแพลตฟอร์ม
-const OUR_DELAY = { low: '≈ 0.5–1', normal: '≈ 1–2', stable: '≈ 2–3' };
+const OUR_DELAY = { low: '≈ 0.2', normal: '≈ 0.6', stable: '≈ 1–2' };
 const delaySec = () => Math.min(300, Math.max(0, Math.round(Number($('delaySec').value) || 0)));
 
 function renderLatency() {
@@ -153,11 +154,17 @@ function renderLatency() {
   $('latencyInfo').innerHTML = `
     <div>ดีเลย์จากโปรแกรมนี้ <b>${OUR_DELAY[mode]} วินาที</b>${extra ? ` + หน่วงเพิ่ม <b>${extra} วินาที</b>` : ''}</div>
     <div class="muted">ดีเลย์ส่วนใหญ่มาจากแพลตฟอร์ม — ตั้งใน YouTube Studio → การตั้งค่าสตรีม → <b>ความหน่วงของสตรีม: ${yt}</b>
-    (ปกติ ≈ 15–30 วิ · ต่ำ ≈ 5–10 วิ · ต่ำพิเศษ ≈ 2–5 วิ) · Facebook/TikTok ≈ 3–10 วิ ตั้งค่าไม่ได้</div>
+    (ปกติ ≈ 15–30 วิ · ต่ำ ≈ 5–10 วิ · ต่ำพิเศษ ≈ 2–5 วิ) · Facebook/TikTok ≈ 3–10 วิ ตั้งค่าไม่ได้
+    ${dests.some((d) => d.on && d.platform === 'restream') ? ' · <b>ผ่าน Restream</b> บวกเพิ่มอีก ≈ 2–5 วิ (ช่องที่ไลฟ์ตรงจาก Yoddoy ได้ เช่น YouTube ให้ส่งตรง ไม่ต้องผ่าน Restream)' : ''}</div>
     ${extra ? '<div class="muted">หน่วงเพิ่มใช้กันคนดูไลฟ์แอบส่อง (เช่นเกม ROV) — ทุกแพลตฟอร์มหน่วงเท่ากัน</div>' : ''}`;
 }
 
 const q = store.get('quality', {});
+// เปลี่ยนโหมดดีเลย์เป็น "ต่ำสุด" ให้ครั้งเดียว (ผู้ใช้ขอให้ดีเลย์น้อยลง · ต่ำสุดเร็วกว่าสมดุล ~3 เท่า และยังเสถียร)
+if (!store.get('lowLatencyMigrated', false)) {
+  if (!q.latency || q.latency === 'normal') q.latency = 'low';
+  store.set('lowLatencyMigrated', true);
+}
 for (const k of ['upload', 'orient', 'res', 'fps', 'vkbps', 'akbps', 'latency', 'delaySec']) if (q[k] != null && q[k] !== '') $(k).value = q[k];
 $('manual').checked = !!q.manual;
 $('manualBox').hidden = !$('manual').checked;
