@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 // ---------- แพลตฟอร์ม ----------
 // max = บิตเรตวิดีโอสูงสุดที่แนะนำโดยประมาณ (kbps) · orient = แนวภาพที่แพลตฟอร์มนั้นเหมาะ (h แนวนอน / v แนวตั้ง)
 const PLATFORMS = {
-  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
+  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 12000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
   facebook: { name: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', max: 9000, orient: 'h', help: 'Facebook → วิดีโอสด → ซอฟต์แวร์สตรีม → คัดลอก “คีย์สตรีม”' },
   tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key · ไม่มี Stream Key? ใช้ปุ่ม “เปิดจอสำหรับ LIVE Studio” แทน' },
   instagram: { name: 'Instagram', url: '', max: 6000, orient: 'v', help: 'instagram.com บนคอม → สร้าง → วิดีโอสด → คัดลอก Stream URL และ Stream key' },
@@ -17,7 +17,7 @@ const PLATFORMS = {
 
 // ระดับคุณภาพ: min = บิตเรตต่ำสุดที่ยังดูดี, rec = บิตเรตที่แนะนำ
 const TIERS = [
-  { label: '1080p 60fps', h: 1080, fps: 60, min: 6000, rec: 8000 },
+  { label: '1080p 60fps', h: 1080, fps: 60, min: 6000, rec: 12000 }, // YouTube แนะนำ 12 Mbps สำหรับ 1080p60
   { label: '1080p 30fps', h: 1080, fps: 30, min: 4500, rec: 6000 },
   { label: '720p 60fps', h: 720, fps: 60, min: 4000, rec: 5000 },
   { label: '720p 30fps', h: 720, fps: 30, min: 2500, rec: 3500 },
@@ -101,8 +101,12 @@ function calc() {
   const active = dests.filter((d) => d.on);
   const n = Math.max(1, active.length);
   const audio = +$('akbps').value;
-  const cap = Math.min(...active.map((d) => (PLATFORMS[d.platform] || PLATFORMS.custom).max), 20000);
-  const perDest = Math.floor((upMbps * 1000 * HEADROOM) / n) - audio; // tee ส่งสำเนาแยกให้ทุกปลายทาง → อัปโหลดคูณจำนวนปลายทาง
+  // แต่ละปลายทางรับบิตเรตได้ไม่เท่ากัน: ภาพหลักใช้เพดานของช่องที่รับได้สูงสุด
+  // ช่องที่รับได้ต่ำกว่า (เช่น TikTok/Restream 6000) → Helper บีบอัดสำเนาแยกให้ ไม่ฉุดคุณภาพช่องอื่น
+  const caps = active.length ? active.map((d) => Math.min(20000, (PLATFORMS[d.platform] || PLATFORMS.custom).max)) : [20000];
+  const cap = Math.max(...caps);
+  const budgetUp = upMbps * 1000 * HEADROOM;
+  const upFor = (k) => caps.reduce((sum, c) => sum + Math.min(k, c) + audio, 0); // อัปโหลดรวมที่ต้องใช้ถ้าภาพหลัก = k kbps
   const vertical = $('orient').value === 'v';
   const notes = [];
 
@@ -111,14 +115,25 @@ function calc() {
     plan = { ...dims(t.h, vertical), fps: t.fps, videoKbps: +$('vkbps').value, audioKbps: audio, label: `${t.h}p ${t.fps}fps (ตั้งเอง)` };
     if (plan.videoKbps > cap) notes.push(`บิตเรตสูงกว่าที่แพลตฟอร์มแนะนำ (${cap} kbps) อาจถูกปฏิเสธหรือกระตุก`);
   } else {
-    const budget = Math.min(perDest, cap);
-    const tier = TIERS.find((t) => budget >= t.min) || TIERS[TIERS.length - 1];
-    const kbps = Math.max(300, Math.floor(Math.min(tier.rec, budget) / 100) * 100);
-    plan = { ...dims(tier.h, vertical), fps: tier.fps, videoKbps: kbps, audioKbps: audio, label: tier.label };
-    if (budget < TIERS[TIERS.length - 1].min) notes.push('อัปโหลดไม่พอสำหรับจำนวนปลายทางนี้ — ลดปลายทาง หรือใช้เน็ตที่แรงขึ้น');
+    // หาคุณภาพสูงสุดที่อัปโหลดรับไหว
+    let pick = null;
+    for (const t of TIERS) {
+      for (let k = Math.min(t.rec, cap); k >= t.min; k -= 500) {
+        if (upFor(k) <= budgetUp) { pick = { t, k }; break; }
+      }
+      if (pick) break;
+    }
+    if (!pick) {
+      const t = TIERS[TIERS.length - 1];
+      pick = { t, k: t.min };
+      notes.push('อัปโหลดไม่พอสำหรับจำนวนปลายทางนี้ — ลดปลายทาง หรือใช้เน็ตที่แรงขึ้น');
+    }
+    plan = { ...dims(pick.t.h, vertical), fps: pick.t.fps, videoKbps: Math.max(300, Math.floor(pick.k / 100) * 100), audioKbps: audio, label: pick.t.label };
   }
+  const reduced = active.filter((d) => (PLATFORMS[d.platform] || PLATFORMS.custom).max < plan.videoKbps * 0.95);
+  if (reduced.length) notes.push(`${reduced.map((d) => `${PLATFORMS[d.platform].name} ${PLATFORMS[d.platform].max} kbps`).join(', ')} — บีบอัดสำเนาแยกให้ (ใช้การ์ดจอเพิ่มเล็กน้อย) ช่องอื่นยังได้ภาพเต็ม`);
 
-  const totalMbps = ((plan.videoKbps + plan.audioKbps) * n) / 1000;
+  const totalMbps = upFor(plan.videoKbps) / 1000;
   const pct = upMbps ? Math.round((totalMbps / upMbps) * 100) : 100;
   if (pct > 80) notes.push('ใช้อัปโหลดเกิน 80% — เสี่ยงกระตุกเมื่อเน็ตแกว่ง');
   const wrongOrient = active.filter((d) => { const o = (PLATFORMS[d.platform] || {}).orient; return o && o !== (vertical ? 'v' : 'h'); }).map((d) => PLATFORMS[d.platform].name);
@@ -398,6 +413,7 @@ function drawLayerContent(l) {
 function draw() {
   const W = canvas.width;
   const H = canvas.height;
+  ctx2d.imageSmoothingQuality = 'high'; // ย่อ/ขยายภาพจอและกล้องให้คม (ค่าเริ่มต้นของเบราว์เซอร์คือ low)
   ctx2d.fillStyle = '#000';
   ctx2d.fillRect(0, 0, W, H);
   drawSceneCard(W, H); // ฉากหลังสำเร็จรูปของฉาก (scenes.js)
@@ -1935,7 +1951,7 @@ function liveDestinations() {
     toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
     return null;
   }
-  return active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key }));
+  return active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key, maxKbps: (PLATFORMS[d.platform] || PLATFORMS.custom).max }));
 }
 
 function helperReady() {
@@ -1963,7 +1979,8 @@ async function startPipeline({ destinations, record }) {
   recorder = new MediaRecorder(stream, {
     mimeType: pickMime(),
     // ส่งภายในเครื่องแบบคุณภาพเผื่อไว้ ~1.6 เท่า แล้วค่อยบีบที่ FFmpeg (สูงเกินไปทำให้เบราว์เซอร์เข้ารหัสหนักโดยไม่จำเป็น)
-    videoBitsPerSecond: Math.max(5e6, plan.videoKbps * 1600),
+    // ส่งภายในเครื่อง (ไม่กินเน็ต) → ตั้งสูงไว้ ภาพไม่เสียรายละเอียดตอนบีบอัดรอบสองที่ Helper
+    videoBitsPerSecond: Math.min(40e6, Math.max(16e6, plan.videoKbps * 2500)),
     audioBitsPerSecond: 192000,
   });
   // ส่ง Blob ตรง ๆ: WebSocket รับประกันลำดับ (ถ้า await arrayBuffer() ก่อน ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)

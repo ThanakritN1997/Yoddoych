@@ -49,7 +49,9 @@ function videoArgs(enc, kbps, fps, latency = 'normal') {
   const noB = L.bframes ? [] : ['-bf', '0'];
   switch (enc) {
     case 'h264_nvenc':
-      return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', latency === 'stable' ? 'hq' : 'll', '-rc', 'cbr', '-profile:v', 'high', '-forced-idr', '1',
+      // p5 + spatial AQ + multipass ¼ ความละเอียด: รายละเอียด (เช่นพื้นผิวในเกม) คมขึ้นที่บิตเรตเท่าเดิม ยังเร็วกว่าเวลาจริง ~2.5 เท่า
+      return ['-c:v', 'h264_nvenc', '-preset', 'p5', '-tune', latency === 'stable' ? 'hq' : 'll', '-rc', 'cbr', '-profile:v', 'high', '-forced-idr', '1',
+        '-spatial-aq', '1', '-aq-strength', '8', '-multipass', 'qres',
         ...(latency === 'low' ? ['-zerolatency', '1', '-delay', '0'] : []), ...noB, ...common];
     case 'h264_qsv':
       return ['-c:v', 'h264_qsv', '-preset', 'faster', '-profile:v', 'high', ...(latency === 'low' ? ['-low_delay_brc', '1'] : []), ...noB, ...common];
@@ -88,13 +90,16 @@ function encoderArgs(cfg) {
 
 // ตัวส่งต่อ 1 ตัวต่อ 1 ปลายทาง: ไม่บีบอัดซ้ำ (copy) แค่ห่อเป็น FLV แล้วส่ง RTMP
 // หลุดเมื่อไหร่ → เปิดตัวใหม่ = เชื่อมต่อใหม่พร้อม header ครบ (ไม่ใช่ต่อสายเดิมกลางคัน)
-function relayArgs(target) {
+// tx = ปลายทางนี้รับบิตเรตต่ำกว่าภาพหลัก (เช่น TikTok/Restream ≤ 6000) → บีบอัดสำเนาแยกให้ช่องนี้ช่องเดียว
+//      ช่องอื่น (เช่น YouTube) ยังได้ภาพคุณภาพเต็ม
+function relayArgs(target, tx) {
   return [
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '2',
     // วิเคราะห์สตรีมแค่ ~3 วินาที (ค่าเริ่มต้น 5) ให้ต่อใหม่ได้เร็วขึ้น — ต้องนานกว่าระยะ keyframe (2 วินาที)
     // เพราะตัวที่เริ่มกลางสตรีมต้องรอเจอ keyframe + SPS/PPS ก่อนจึงจะรู้รูปแบบวิดีโอ
     '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '3000000', '-probesize', '4000000', '-f', 'mpegts', '-i', 'pipe:0',
-    '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy',
+    '-map', '0:v:0', '-map', '0:a:0',
+    ...(tx ? [...videoArgs(tx.encoder, tx.kbps, tx.fps, tx.latency), '-c:a', 'copy'] : ['-c', 'copy']),
     '-f', 'flv', '-flvflags', 'no_duration_filesize', target,
   ];
 }
@@ -219,7 +224,7 @@ function attach() {
       r.state = r.connects ? 'reconnecting' : 'connecting';
       r.connects++;
       r.bytes = 0;
-      const proc = boost(spawn(FFMPEG, relayArgs(r.target), { windowsHide: true }));
+      const proc = boost(spawn(FFMPEG, relayArgs(r.target, r.tx), { windowsHide: true }));
       r.proc = proc;
       r.startedAt = Date.now();
       proc.stdin.on('error', () => {});
@@ -258,7 +263,12 @@ function attach() {
       s.delayMs = Math.min(300, Math.max(0, Number(delaySec) || 0)) * 1000; // หน่วงเพิ่มตั้งใจ สูงสุด 5 นาที
       const secrets = list.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
       s.secrets = secrets;
-      s.relays = list.map((d) => ({ name: d.name, target: joinUrl(d.url, d.key), state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null }));
+      s.relays = list.map((d) => {
+        // ปลายทางที่รับบิตเรตต่ำกว่าภาพหลัก → บีบอัดสำเนาแยกที่บิตเรตของช่องนั้น
+        const max = Math.max(300, Number(d.maxKbps) || 0);
+        const tx = d.maxKbps && max < s.cfg.videoKbps * 0.95 ? { encoder: s.cfg.encoder, kbps: max, fps: s.cfg.fps, latency: s.cfg.latency } : null;
+        return { name: d.name, target: joinUrl(d.url, d.key), tx, state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null };
+      });
       s.relays.forEach((r) => startRelay(s, r));
     }
 
@@ -323,6 +333,7 @@ function attach() {
         };
         const s = {
           stopped: false,
+          cfg,
           relays: [],
           queue: [],
           secrets: [],
@@ -330,7 +341,7 @@ function attach() {
           rec: null,
           hide: (line) => s.secrets.reduce((acc, k) => acc.split(k).join('••••'), line),
         };
-        s.publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1) }));
+        s.publicDests = () => s.relays.map((r) => ({ name: r.name, state: r.state, kbps: r.kbps, reconnects: Math.max(0, r.connects - 1), txKbps: r.tx ? r.tx.kbps : 0 }));
 
         s.encoder = boost(spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true }));
         session = s;
