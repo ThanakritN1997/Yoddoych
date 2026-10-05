@@ -65,6 +65,11 @@
   <main class="studio">
     <!-- ซ้าย: จอพรีวิว + สุขภาพสตรีม -->
     <section class="stage-col" aria-label="จอพรีวิว">
+      <div id="restoreBar" class="restore-bar" hidden>
+        <div><b>เปิดแหล่งภาพเดิมต่อ:</b> <span id="restoreWhat"></span><div id="restoreHint" class="muted small"></div></div>
+        <button id="restoreGo" class="btn primary small">▶ เลือกจอเดิม</button>
+        <button id="restoreSkip" class="btn small">ไม่ใช้</button>
+      </div>
       <div id="stageWrap" class="stage-wrap">
         <div class="canvas-box">
           <canvas id="canvas" width="1280" height="720"></canvas>
@@ -184,6 +189,7 @@
             <summary>🔗 แปะ URL บนจอ (แจ้งเตือนโดเนท · วิดเจ็ต · แชทรวม)</summary>
             <p class="muted small">ใช้ลิงก์ Browser Source แบบเดียวกับ OBS เช่น Tipme, EasyDonate, Streamlabs, StreamElements, Restream Chat</p>
             <input id="webUrl" type="url" placeholder="https://… ลิงก์วิดเจ็ต" autocomplete="off">
+            <div id="recentWeb" class="row wrap-tight"></div>
             <div class="row nowrap add-row">
               <label class="field inline">กว้าง <input id="webW" type="number" min="200" max="3840" value="800"></label>
               <label class="field inline">สูง <input id="webH" type="number" min="150" max="2160" value="600"></label>
@@ -492,7 +498,7 @@
             <ol class="steps small">
               <li><b>developers.restream.io</b> → ล็อกอิน → <b>Applications</b> → สร้างแอป “Yoddoy Studio”</li>
               <li>Redirect URI: <code>https://yoddoych.vercel.app/oauth/restream/callback</code></li>
-              <li>สิทธิ์ (scopes): <code>profile.read</code> <code>channels.read</code> <code>channels.write</code> <code>stream.read</code></li>
+              <li>สิทธิ์ (scopes): <code>profile.read</code> <code>channels.read</code> <code>channels.write</code> <code>stream.read</code> <code>chat.read</code> (อ่านแชท)</li>
               <li><b>Vercel</b> → โปรเจกต์ Yoddoych → Settings → Environment Variables → เพิ่ม <code>RESTREAM_CLIENT_ID</code> และ <code>RESTREAM_CLIENT_SECRET</code> → Redeploy</li>
             </ol>
           </details>
@@ -586,6 +592,29 @@
       <!-- ===== แชท ===== -->
       <div class="tabpanel" data-panel="chat" hidden>
         <section class="card">
+          <div class="beauty-head">
+            <h2>อ่านแชท <span class="tag">R = เปิด/ปิด</span></h2>
+            <label class="check small cr-master"><input id="crOn" type="checkbox"> อ่านออกเสียง</label>
+          </div>
+          <div class="field">อ่านแชทจากช่องไหนบ้าง</div>
+          <div id="crSources" class="cr-sources"></div>
+          <div id="crStatus" class="muted small face-status"></div>
+          <div id="crFeed" class="cr-feed"><p id="crEmpty" class="muted small">แชทจะขึ้นที่นี่ — ใส่ลิงก์ YouTube / ชื่อช่อง Twitch ด้านล่าง หรือเชื่อม Restream ในแท็บปลายทาง (รวม YouTube, Facebook, Twitch, Kick ในที่เดียว)</p></div>
+          <div class="row">
+            <button id="crTest" class="btn small">🔊 ทดสอบเสียง</button>
+            <button id="crSkip" class="btn small">⏭ ข้ามข้อความนี้</button>
+            <label class="check small"><input id="crReadName" type="checkbox"> อ่านชื่อคนพิมพ์</label>
+          </div>
+          <label class="field">เสียงอ่าน
+            <select id="crVoice"></select>
+          </label>
+          <p id="crNoThai" class="muted small" hidden>⚠️ เครื่องนี้ไม่มีเสียงภาษาไทย — Windows: ตั้งค่า → เวลาและภาษา → คำพูด → เพิ่มเสียง → ไทย</p>
+          <div class="beauty-slider"><span class="beauty-name">ความเร็ว</span><input id="crRate" type="range" min="0.7" max="1.8" step="0.1"><span id="crRateVal" class="beauty-val"></span></div>
+          <div class="beauty-slider"><span class="beauty-name">ความดัง</span><input id="crVolume" type="range" min="10" max="100"><span id="crVolumeVal" class="beauty-val"></span></div>
+          <p class="muted small">เสียงอ่านออกลำโพงคอม (ไม่เข้าไลฟ์) · ข้ามคำสั่งบอท (!…) · ลิงก์อ่านว่า “ลิงก์” · แชทมาเร็วจะข้ามข้อความเก่าให้ทัน · TikTok ยังไม่เปิดให้อ่านแชทแบบทางการ</p>
+        </section>
+
+        <section class="card">
           <h2>ยอดคนดู</h2>
           <p class="muted small">YouTube: ใช้ลิงก์ไลฟ์ด้านล่าง + <b>YouTube API Key</b> (สร้างฟรีที่ Google Cloud Console → เปิด YouTube Data API v3 → Credentials → API key) · TikTok/Facebook ไม่เปิดให้ดึงยอดคนดู — ดูในแอปของแพลตฟอร์ม</p>
           <label class="field">YouTube API Key
@@ -628,6 +657,8 @@
   <script src="mixer.js"></script>
   <script src="scenes.js"></script>
   <script src="restream.js"></script>
+  <script src="session.js"></script>
+  <script src="chatreader.js"></script>
   <script src="mirror-control.js"></script>
 </body>
 </html>

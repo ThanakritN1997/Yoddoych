@@ -413,6 +413,9 @@ function draw() {
   drawOverlay();
 }
 const bannerText = () => $('banner').value.trim();
+// จำข้อความแถบล่าง
+$('banner').value = store.get('banner', '');
+$('banner').addEventListener('input', () => store.set('banner', $('banner').value));
 const UI_FONT = '"Noto Sans Thai", "Sarabun", system-ui, sans-serif';
 
 // ---------- ชื่อขึ้นจอ (ป้ายขอบคุณคนดู) ----------
@@ -925,6 +928,9 @@ function addSource(kind, stream) {
   }
   l.stream = stream;
   l.visible = true;
+  // จำว่าเปิดแหล่งภาพนี้ไว้ → เปิดเว็บครั้งหน้าเปิดให้เอง (กล้อง) หรือมีปุ่มเปิดจอเดิม (จอ)
+  store.set(kind + 'On', true);
+  if (kind === 'screen') store.set('screenLabel', stream.getVideoTracks()[0]?.label || '');
   l.video.srcObject = stream;
   l.video.play().catch(() => {});
   const track = stream.getVideoTracks()[0];
@@ -954,6 +960,7 @@ function removeSource(kind) {
   l.video.srcObject = null;
   if (kind === 'screen') connectScreenAudio(null);
   if (kind === 'cam') $('srcCam').textContent = '🎥 เปิดกล้อง';
+  store.set(kind + 'On', false); // ผู้ใช้ปิดเอง → ครั้งหน้าไม่ต้องเปิดให้
   renderLayerPanel();
 }
 
@@ -1129,6 +1136,9 @@ $('webOpen').onclick = () => {
   const win = window.open(url, name, `popup=yes,width=${w},height=${h}`);
   if (!win) return toast('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วกดอีกครั้ง');
   pendingWeb = { url, win };
+  // จำลิงก์ล่าสุด (สูงสุด 6) ไว้กดใช้ซ้ำครั้งหน้า
+  store.set('recentWeb', [{ url, w, h }, ...store.get('recentWeb', []).filter((x) => x.url !== url)].slice(0, 6));
+  renderRecentWeb();
   $('webCapture').hidden = false;
   $('webStep').textContent = 'ขั้นที่ 2: กด “จับภาพหน้าต่างนี้” → เลือกแท็บ/หน้าต่างของลิงก์ที่เพิ่งเปิด';
 };
@@ -1160,6 +1170,26 @@ $('webCapture').onclick = async () => {
     toast('ยกเลิกการจับภาพ');
   }
 };
+function renderRecentWeb() {
+  const box = $('recentWeb');
+  const list = store.get('recentWeb', []);
+  box.innerHTML = list.length ? '<span class="muted small">ใช้ล่าสุด:</span>' : '';
+  for (const it of list) {
+    const b = document.createElement('button');
+    b.className = 'btn small';
+    b.title = it.url;
+    try { b.textContent = new URL(it.url).hostname.replace(/^www\./, ''); } catch { continue; }
+    b.onclick = () => {
+      $('webUrl').value = it.url;
+      $('webW').value = it.w;
+      $('webH').value = it.h;
+      toast('ใส่ลิงก์แล้ว — กด “1. เปิดลิงก์”');
+    };
+    box.append(b);
+  }
+}
+renderRecentWeb();
+
 document.querySelectorAll('[data-websize]').forEach((b) => (b.onclick = () => {
   const [w, h] = b.dataset.websize === 'canvas' ? [canvas.width, canvas.height] : b.dataset.websize.split('x');
   $('webW').value = w;
@@ -1968,6 +1998,14 @@ function beginLiveUi() {
 async function startLive() {
   const list = liveDestinations();
   if (!list || !helperReady()) return;
+  // ถามครั้งเดียว: จำ Stream Key ไว้ไหม (ไม่จำ = ต้องวางคีย์ใหม่ทุกครั้งที่เปิดเว็บ)
+  if (!$('rememberKeys').checked && !store.get('askedRemember', false)) {
+    store.set('askedRemember', true);
+    if (confirm('จำ Stream Key ไว้ในเบราว์เซอร์เครื่องนี้ไหม?\nครั้งหน้าจะได้ไม่ต้องวางคีย์ใหม่ (ไม่ควรเปิดบนคอมที่คนอื่นใช้ด้วย)')) {
+      $('rememberKeys').checked = true;
+      saveDests();
+    }
+  }
   cancelResume();
   beginLiveUi();
   wantLive = true;

@@ -272,7 +272,7 @@ const dbToPct = (db) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
 async function listDevices() {
   const devs = await navigator.mediaDevices.enumerateDevices();
   const fill = (sel, kind, first) => {
-    const cur = sel.value || (kind === 'audioinput' ? store.get('micId', '') : '');
+    const cur = sel.value || store.get(kind === 'audioinput' ? 'micId' : 'camId', '');
     sel.innerHTML = '';
     sel.add(new Option(first[0], first[1]));
     devs.filter((d) => d.kind === kind).forEach((d, i) => sel.add(new Option(d.label || `${kind === 'audioinput' ? 'ไมค์' : 'กล้อง'} ${i + 1}`, d.deviceId || 'default')));
