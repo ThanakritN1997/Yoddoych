@@ -1709,8 +1709,14 @@ function watchDests(list) {
   for (const d of list || []) {
     const p = destPrev[d.name] || { state: 'connecting' };
     const down = d.state === 'error' || d.state === 'reconnecting' || d.state === 'failed';
+    // ต่อไม่ติดตั้งแต่แรกหลายครั้ง (ยังไม่เคยออนไลน์) = Server URL/Stream Key ผิด หรือยังไม่ได้เปิดไลฟ์ที่แพลตฟอร์ม
+    if (!p.everLive && d.state !== 'live' && d.reconnects >= 3 && !p.warned) {
+      destPrev[d.name] = { ...p, state: d.state, warned: true };
+      liveAlert('danger', `⚠️ ต่อ ${d.name} ไม่ติด`, 'ตรวจ Server URL และ Stream Key ในแท็บปลายทาง (คัดลอกใหม่จากหน้าแพลตฟอร์ม) — ระบบยังลองต่อให้อยู่', d.name);
+      continue;
+    }
     if (p.state === 'live' && down) {
-      destPrev[d.name] = { state: d.state, downAt: Date.now() };
+      destPrev[d.name] = { state: d.state, downAt: Date.now(), everLive: true };
       liveAlert('danger', `🔴 ${d.name} ไลฟ์หลุด`, 'กำลังต่อใหม่อัตโนมัติ… ถ้าหลุดนาน ให้เช็กเน็ตหรือ Stream Key', d.name);
       continue;
     }
@@ -1719,7 +1725,8 @@ function watchDests(list) {
         const sec = Math.round((Date.now() - p.downAt) / 1000);
         liveAlert('ok', `🟢 ${d.name} กลับมาออนไลน์แล้ว`, `หลุดไป ${sec} วินาที`, d.name);
       }
-      destPrev[d.name] = { state: 'live' };
+      destPrev[d.name] = { state: 'live', everLive: true };
+      if (p.warned) $('alertStack').querySelectorAll(`[data-key="${CSS.escape(d.name)}"]`).forEach((el) => el.remove()); // ต่อติดแล้ว → ลบคำเตือน
       continue;
     }
     destPrev[d.name] = { ...p, state: d.state };
@@ -1875,6 +1882,15 @@ function liveDestinations() {
     showTab('dest');
     toast('เพิ่มปลายทางอย่างน้อย 1 ช่อง');
     return null;
+  }
+  // แก้ Server URL ที่พิมพ์ผิดบ่อย: YouTube ต้องเป็น …/live2 (ใส่ …/live จะต่อไม่ติดและวนต่อใหม่ไม่จบ)
+  for (const d of active) {
+    if (d.platform === 'youtube' && /^rtmps?:\/\/a\.rtmps?\.youtube\.com\/live\/?$/i.test(d.url || '')) {
+      d.url = PLATFORMS.youtube.url;
+      saveDests();
+      renderDests();
+      toast('แก้ Server URL ของ YouTube เป็น …/live2 ให้แล้ว');
+    }
   }
   const missing = active.find((d) => !d.url || !d.key);
   if (missing) {
