@@ -516,8 +516,9 @@ function drawShoutout(W, H) {
 const viewerData = {}; // { youtube: { viewers, likes, at } }
 function drawViewerBadge(W, H) {
   if (!$('viewerOnScreen').checked) return;
-  const total = Object.values(viewerData).reduce((s, d) => s + (d.viewers || 0), 0);
-  if (!Object.keys(viewerData).length) return;
+  const src = viewerSources();
+  if (!src.length) return;
+  const total = viewerTotal();
   const S = Math.min(W, H);
   const fs = Math.round(S * 0.032);
   const m = S * 0.03;
@@ -540,6 +541,28 @@ function drawViewerBadge(W, H) {
   ctx2d.fillText('LIVE', m + fs * 0.62, m + bh / 2);
   ctx2d.font = `700 ${fs}px ${UI_FONT}`;
   ctx2d.fillText(label, m + fs * 2.95, m + bh / 2);
+  // หลายช่อง → แถวเล็กใต้ป้าย แยกยอดแต่ละแพลตฟอร์ม (จุดสีตามแพลตฟอร์ม)
+  if (src.length > 1 && $('viewerSplit').checked) {
+    const sf = Math.round(fs * 0.62);
+    ctx2d.font = `600 ${sf}px ${UI_FONT}`;
+    let x = m;
+    const y = m + bh + sf * 1.1;
+    for (const d of src) {
+      const t = `${d.platform} ${(d.viewers ?? 0).toLocaleString()}`;
+      const w = ctx2d.measureText(t).width + sf * 1.9;
+      ctx2d.fillStyle = 'rgba(0,0,0,.55)';
+      ctx2d.beginPath();
+      ctx2d.roundRect(x, y - sf * 0.8, w, sf * 1.6, sf * 0.8);
+      ctx2d.fill();
+      ctx2d.fillStyle = PLATFORM_COLORS[d.platform] || '#8d96a7';
+      ctx2d.beginPath();
+      ctx2d.arc(x + sf * 0.75, y, sf * 0.3, 0, Math.PI * 2);
+      ctx2d.fill();
+      ctx2d.fillStyle = '#fff';
+      ctx2d.fillText(t, x + sf * 1.3, y);
+      x += w + sf * 0.4;
+    }
+  }
   ctx2d.restore();
 }
 
@@ -1828,6 +1851,8 @@ $('ytApiKey').value = store.get('ytApiKey', '');
 $('viewerOnScreen').checked = store.get('viewerOnScreen', false);
 $('ytApiKey').onchange = () => { store.set('ytApiKey', $('ytApiKey').value.trim()); pollViewers(); };
 $('viewerOnScreen').onchange = () => store.set('viewerOnScreen', $('viewerOnScreen').checked);
+$('viewerSplit').checked = store.get('viewerSplit', true);
+$('viewerSplit').onchange = () => store.set('viewerSplit', $('viewerSplit').checked);
 async function pollViewers() {
   const key = $('ytApiKey').value.trim();
   const id = youtubeId($('chatYoutube').value);
@@ -1843,7 +1868,7 @@ async function pollViewers() {
     const it = j.items && j.items[0];
     if (!it) throw new Error('ไม่พบวิดีโอนี้');
     const live = it.liveStreamingDetails || {};
-    viewerData.youtube = { viewers: +(live.concurrentViewers || 0), likes: +(it.statistics?.likeCount || 0), live: !!live.concurrentViewers, at: Date.now() };
+    viewerData.youtube = { name: 'YouTube', platform: 'YouTube', viewers: +(live.concurrentViewers || 0), likes: +(it.statistics?.likeCount || 0), live: !!live.concurrentViewers, at: Date.now() };
     $('viewerStatus').textContent = live.concurrentViewers ? `อัปเดต ${new Date().toLocaleTimeString('th-TH')}` : 'ไลฟ์นี้ยังไม่ออนแอร์ หรือจบแล้ว';
   } catch (e) {
     delete viewerData.youtube;
@@ -1851,12 +1876,37 @@ async function pollViewers() {
   }
   renderViewers();
 }
+// แหล่งยอดคนดู: YouTube (API Key ตรง) + ทุกช่องใน Restream (restream.js ใส่ 'rs:<ช่อง>')
+// ถ้า Restream ก็รายงาน YouTube อยู่แล้ว → ไม่นับ YouTube ตรงซ้ำ
+const PLATFORM_COLORS = { YouTube: '#ff4e45', TikTok: '#25f4ee', Facebook: '#4f8cff', Twitch: '#a970ff', Kick: '#53fc18', Instagram: '#e1306c', X: '#e7e9ea', LinkedIn: '#0a66c2' };
+function viewerSources() {
+  const list = Object.entries(viewerData).map(([id, d]) => ({ id, ...d }));
+  const rsHasYt = list.some((d) => d.id.startsWith('rs:') && /youtube/i.test(d.platform || ''));
+  return list.filter((d) => !(d.id === 'youtube' && rsHasYt));
+}
+function viewerTotal() {
+  return viewerSources().reduce((s, d) => s + (d.viewers || 0), 0);
+}
 function renderViewers() {
-  const y = viewerData.youtube;
-  $('viewerStats').innerHTML = y ? `<span class="chip viewer">YouTube · 👁 ${y.viewers.toLocaleString()} คนดู · ❤ ${y.likes.toLocaleString()}</span>` : '';
+  const src = viewerSources();
+  if (!src.length) return ($('viewerStats').innerHTML = '');
+  const chips = src.map((d) => {
+    const c = PLATFORM_COLORS[d.platform] || '#8d96a7';
+    const name = d.name && d.name !== d.platform ? `${d.platform} (${d.name})` : d.platform;
+    return `<span class="chip viewer"><i style="background:${c}"></i>${esc(name)} · 👁 ${(d.viewers ?? 0).toLocaleString()}${d.likes ? ` · ❤ ${d.likes.toLocaleString()}` : ''}</span>`;
+  });
+  if (src.length > 1) chips.unshift(`<span class="chip viewer total">รวม 👁 ${viewerTotal().toLocaleString()} คนดู</span>`);
+  $('viewerStats').innerHTML = chips.join('');
 }
 $('chatYoutube').addEventListener('change', pollViewers);
-setInterval(pollViewers, 30000); // โควตาฟรี 10,000/วัน · ครั้งละ 1 หน่วย
+// ไลฟ์อยู่ = ทุก 15 วิ · ไม่ได้ไลฟ์ = ทุก 60 วิ (โควตาฟรี 10,000/วัน · ครั้งละ 1 หน่วย)
+let lastViewerPoll = 0;
+setInterval(() => {
+  if (Date.now() - lastViewerPoll >= (isLive ? 15000 : 60000)) {
+    lastViewerPoll = Date.now();
+    pollViewers();
+  }
+}, 5000);
 pollViewers();
 
 // ---------- ป้ายชื่อขึ้นจอ ----------

@@ -148,4 +148,53 @@ $('rsTitleSave').onclick = async () => {
 };
 $('rsTitle').value = store.get('rsTitle', '');
 
-if (rs) rsSync();
+// ---------- ยอดคนดูแบบเรียลไทม์ของทุกช่องใน Restream (Restream Streaming Updates) ----------
+const normPlatform = (name) => {
+  const n = String(name || '');
+  for (const p of ['YouTube', 'TikTok', 'Facebook', 'Twitch', 'Kick', 'Instagram', 'LinkedIn', 'Trovo', 'DLive', 'Rumble']) if (n.toLowerCase().includes(p.toLowerCase())) return p;
+  if (/^x\b|twitter/i.test(n)) return 'X';
+  return n || 'ช่อง';
+};
+let rsStatusWs = null;
+let rsStatusTimer = null;
+async function connectRsStatus() {
+  clearTimeout(rsStatusTimer);
+  if (rsStatusWs) { rsStatusWs.onclose = null; rsStatusWs.close(); rsStatusWs = null; }
+  for (const k of Object.keys(viewerData)) if (k.startsWith('rs:')) delete viewerData[k];
+  renderViewers();
+  if (!rs) return;
+  let token;
+  try { token = await rsToken(); } catch { return; }
+  const ws = new WebSocket('wss://streaming.api.restream.io/ws?accessToken=' + encodeURIComponent(token));
+  rsStatusWs = ws;
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    const key = 'rs:' + m.channelId;
+    if (m.action === 'updateStatuses') {
+      if (!m.online) delete viewerData[key];
+      else {
+        const ch = (window.rsChannels || []).find((c) => c.id === m.channelId);
+        viewerData[key] = { platform: normPlatform(rsPlatforms[m.platformId]), name: ch ? ch.displayName : '', viewers: m.viewers ?? 0, at: Date.now() };
+      }
+      renderViewers();
+    } else if (m.action === 'deleteOutgoing') {
+      delete viewerData[key];
+      renderViewers();
+    }
+  };
+  ws.onclose = () => {
+    if (rsStatusWs !== ws) return;
+    rsStatusTimer = setTimeout(connectRsStatus, 5000); // โทเคนหมดอายุ/เน็ตสะดุด → ต่อใหม่ด้วยโทเคนใหม่
+  };
+}
+// ยอดเก่าค้างเกิน 3 นาที (ช่องหยุดรายงาน) → เอาออก
+setInterval(() => {
+  let changed = false;
+  for (const [k, d] of Object.entries(viewerData)) if (k.startsWith('rs:') && Date.now() - d.at > 180000) { delete viewerData[k]; changed = true; }
+  if (changed) renderViewers();
+}, 30000);
+
+if (rs) rsSync().then(connectRsStatus);
+window.addEventListener('message', (e) => { if (e.data && e.data.type === 'restream-auth') setTimeout(connectRsStatus, 1500); });
+$('rsDisconnectBtn').addEventListener('click', () => setTimeout(connectRsStatus, 300));
