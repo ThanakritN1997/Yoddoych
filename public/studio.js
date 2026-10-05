@@ -1850,7 +1850,11 @@ function beep(freqs) {
 $('ytApiKey').value = store.get('ytApiKey', '');
 $('viewerOnScreen').checked = store.get('viewerOnScreen', false);
 $('ytApiKey').onchange = () => { store.set('ytApiKey', $('ytApiKey').value.trim()); pollViewers(); };
-$('viewerOnScreen').onchange = () => store.set('viewerOnScreen', $('viewerOnScreen').checked);
+$('viewerOnScreen').onchange = () => {
+  store.set('viewerOnScreen', $('viewerOnScreen').checked);
+  renderViewerBar();
+  toast($('viewerOnScreen').checked ? '📺 ยอดคนดูขึ้นบนภาพไลฟ์แล้ว' : '🙈 ซ่อนยอดคนดูจากภาพไลฟ์ (คุณยังเห็นที่แถบบน)');
+};
 $('viewerSplit').checked = store.get('viewerSplit', true);
 $('viewerSplit').onchange = () => store.set('viewerSplit', $('viewerSplit').checked);
 async function pollViewers() {
@@ -1887,7 +1891,26 @@ function viewerSources() {
 function viewerTotal() {
   return viewerSources().reduce((s, d) => s + (d.viewers || 0), 0);
 }
+// แถบบน: ยอดรวม + แยกช่อง (เห็นตลอด เฉพาะผู้ไลฟ์) · ปุ่มเปิด/ปิดโชว์บนภาพไลฟ์
+function renderViewerBar() {
+  const src = viewerSources();
+  $('vbTotal').textContent = src.length ? viewerTotal().toLocaleString() : '–';
+  $('vbSplit').innerHTML = src.length > 1 || (src.length === 1 && src[0].platform !== 'YouTube')
+    ? src.map((d) => `<span><i style="background:${PLATFORM_COLORS[d.platform] || '#8d96a7'}"></i>${(d.viewers ?? 0).toLocaleString()}</span>`).join('')
+    : '';
+  $('vbSplit').title = src.map((d) => `${d.platform}${d.name && d.name !== d.platform ? ' (' + d.name + ')' : ''}: ${(d.viewers ?? 0).toLocaleString()}`).join('\n');
+  const on = $('viewerOnScreen').checked;
+  $('vbScreen').textContent = on ? '📺 ขึ้นจอ' : '🙈 ซ่อนจากจอ';
+  $('vbScreen').classList.toggle('on', on);
+  $('vbScreen').title = on ? 'คนดูเห็นยอดนี้บนภาพไลฟ์ — กดเพื่อซ่อน' : 'คนดูไม่เห็นยอด (คุณเห็นคนเดียว) — กดเพื่อโชว์บนภาพไลฟ์';
+  $('viewerBar').classList.toggle('empty', !src.length);
+}
+$('vbScreen').onclick = () => {
+  $('viewerOnScreen').checked = !$('viewerOnScreen').checked;
+  $('viewerOnScreen').onchange();
+};
 function renderViewers() {
+  renderViewerBar();
   const src = viewerSources();
   if (!src.length) return ($('viewerStats').innerHTML = '');
   const chips = src.map((d) => {

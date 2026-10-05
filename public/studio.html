@@ -26,6 +26,12 @@
     </nav>
     <span id="conn" class="conn">กำลังเชื่อมต่อ…</span>
     <div class="appbar-spacer"></div>
+    <!-- ยอดคนดู: ผู้ไลฟ์เห็นตลอด (ไม่ขึ้นภาพไลฟ์) · ปุ่มจอ = เลือกว่าจะโชว์บนภาพไลฟ์ด้วยไหม -->
+    <div id="viewerBar" class="viewer-bar" title="ยอดคนดูตอนนี้ (เห็นเฉพาะคุณ)">
+      <span class="vb-eye">👁</span><b id="vbTotal">–</b>
+      <span id="vbSplit" class="vb-split"></span>
+      <button id="vbScreen" class="vb-screen" type="button"></button>
+    </div>
     <div id="recBadge" class="live-badge rec-badge" hidden><span class="dot"></span> REC <span id="recTime">00:00:00</span></div>
     <div id="liveBadge" class="live-badge" hidden><span class="dot"></span> LIVE <span id="liveTime">00:00:00</span></div>
     <button id="btnRec" class="btn rec-btn" title="อัดไฟล์ MP4 (ไม่ต้องไลฟ์ก็ได้)" aria-label="อัดไฟล์ MP4"><i></i><span>อัด</span></button>
