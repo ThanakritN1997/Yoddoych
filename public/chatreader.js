@@ -39,6 +39,16 @@ function cleanText(t) {
     .trim()
     .slice(0, cr.maxLen);
 }
+// Chrome มีบั๊ก: บางครั้งไม่แจ้ง "อ่านจบ" (onend ไม่ทำงาน) → คิวค้าง อ่านแค่ข้อความแรกแล้วเงียบไปตลอด
+// แก้: เก็บอ้างอิงข้อความที่กำลังอ่านไว้ (กันถูกเก็บกวาดหน่วยความจำ) + ตัวจับเวลาสำรองปลดคิวเอง
+let currentUtt = null;
+let speakGuard = null;
+function speakDone() {
+  clearTimeout(speakGuard);
+  currentUtt = null;
+  speaking = false;
+  speakNext();
+}
 function speakNext() {
   if (speaking || !speakQueue.length) return;
   const text = speakQueue.shift();
@@ -49,8 +59,16 @@ function speakNext() {
   u.rate = cr.rate;
   u.volume = cr.volume;
   speaking = true;
-  u.onend = u.onerror = () => { speaking = false; speakNext(); };
+  currentUtt = u;
+  u.onend = u.onerror = () => { if (currentUtt === u) speakDone(); };
+  if (speechSynthesis.paused) speechSynthesis.resume();
   speechSynthesis.speak(u);
+  // อ่านนานสุด ~ ความยาวข้อความ × 0.25 วิ + 3 วิ แล้วข้ามไปข้อความถัดไปเอง
+  speakGuard = setTimeout(() => {
+    if (currentUtt !== u) return;
+    speechSynthesis.cancel();
+    speakDone();
+  }, (text.length * 250) / cr.rate + 3000);
 }
 function say(text) {
   if (!text) return;
@@ -168,23 +186,44 @@ function connectTwitch() {
 // ใช้โควตา YouTube API (ฟรี 10,000 หน่วย/วัน · ครั้งละ 5 หน่วย) → ดึงเฉพาะตอนเปิดอ่านแชท YouTube และไม่ถี่กว่า 8 วินาที
 let ytTimer = null;
 let ytState = { video: '', chatId: '', page: '', first: true };
+// ช่อง YouTube ที่ต่อผ่าน Restream และเปิดอยู่ → แชทมาทาง Restream แล้ว (ไม่ต้องดึงตรง กันอ่านซ้ำ)
+function restreamCoversYouTube() {
+  if (typeof rs === 'undefined' || !rs || !rsWs || rsWs.readyState !== WebSocket.OPEN) return false;
+  return (window.rsChannels || []).some((c) => c.active && /youtube/i.test((typeof rsPlatforms !== 'undefined' && rsPlatforms[c.streamingPlatformId]) || ''));
+}
 async function pollYouTube() {
   clearTimeout(ytTimer);
   const key = ($('ytApiKey').value || '').trim();
-  const video = youtubeId($('chatYoutube').value);
-  const useDirect = cr.on && cr.sources.youtube && key && video && !(typeof rs !== 'undefined' && rs);
-  if (!useDirect) return setStatus('yt', key || video ? '' : '');
-  if (video !== ytState.video) ytState = { video, chatId: '', page: '', first: true };
+  const input = ($('chatYoutube').value || '').trim();
+  if (!cr.on || !cr.sources.youtube || !key || !input || restreamCoversYouTube()) {
+    setStatus('yt', cr.on && cr.sources.youtube && input && !key ? '⚠️ YouTube: ใส่ YouTube API Key ในการ์ด “ยอดคนดู” ก่อน' : '');
+    if (cr.on && cr.sources.youtube) ytTimer = setTimeout(pollYouTube, 15000); // เช็กใหม่เรื่อย ๆ (เช่นเพิ่งเริ่มไลฟ์)
+    return;
+  }
   let wait = 10000;
   try {
+    const video = await resolveYouTubeVideo(key);
+    if (!video) {
+      setStatus('yt', isLive ? '🟡 YouTube: กำลังหาไลฟ์ที่ออนแอร์ในช่องนี้… (ประมาณ 30 วิหลังเริ่มไลฟ์)' : '🟡 YouTube: จะเริ่มรับแชทเมื่อกดเริ่มไลฟ์');
+      ytTimer = setTimeout(pollYouTube, 15000);
+      return;
+    }
+    if (video !== ytState.video) ytState = { video, chatId: '', page: '', first: true };
     if (!ytState.chatId) {
       const j = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${video}&key=${encodeURIComponent(key)}`)).json();
       if (j.error) throw new Error(j.error.message);
-      ytState.chatId = j.items?.[0]?.liveStreamingDetails?.activeLiveChatId || '';
-      if (!ytState.chatId) throw new Error('ไลฟ์นี้ยังไม่เริ่ม หรือปิดแชทอยู่');
+      const d = j.items?.[0]?.liveStreamingDetails || {};
+      ytState.chatId = d.activeLiveChatId || '';
+      if (!ytState.chatId) {
+        if (d.actualEndTime) ytLiveEnded(); // ไลฟ์เก่าจบแล้ว → หาไลฟ์ใหม่ในช่อง
+        throw new Error(ytChannelRef(input) ? 'ไลฟ์ล่าสุดจบแล้ว — รอไลฟ์ใหม่' : 'ลิงก์นี้เป็นไลฟ์ที่จบแล้ว/ยังไม่เริ่ม — ใส่ลิงก์ช่อง (@ชื่อช่อง) แทน จะได้ไม่ต้องเปลี่ยนลิงก์ทุกครั้ง');
+      }
     }
     const j = await (await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet,authorDetails&liveChatId=${ytState.chatId}&key=${encodeURIComponent(key)}${ytState.page ? '&pageToken=' + ytState.page : ''}`)).json();
-    if (j.error) throw new Error(j.error.message);
+    if (j.error) {
+      if (/chat.*(ended|not found|disabled)/i.test(j.error.message)) { ytState.chatId = ''; ytLiveEnded(); }
+      throw new Error(j.error.message);
+    }
     ytState.page = j.nextPageToken || '';
     for (const it of j.items || []) {
       const author = it.authorDetails?.displayName || '';
@@ -252,7 +291,7 @@ speechSynthesis.onvoiceschanged = renderVoices;
 $('crOn').onchange = () => {
   cr.on = $('crOn').checked;
   saveCr();
-  if (!cr.on) { speakQueue.length = 0; speechSynthesis.cancel(); speaking = false; }
+  if (!cr.on) { speakQueue.length = 0; speechSynthesis.cancel(); clearTimeout(speakGuard); currentUtt = null; speaking = false; }
   pollYouTube();
   toast(cr.on ? '🔊 เปิดอ่านแชทแล้ว' : 'ปิดอ่านแชทแล้ว');
 };
@@ -261,7 +300,7 @@ $('crRate').oninput = () => { cr.rate = +$('crRate').value; saveCr(); renderCr()
 $('crVolume').oninput = () => { cr.volume = $('crVolume').value / 100; saveCr(); renderCr(); };
 $('crVoice').onchange = () => { cr.voice = $('crVoice').value; saveCr(); };
 $('crTest').onclick = () => say((cr.readName ? 'Yoddoy_Fan บอกว่า ' : '') + 'สวัสดีครับ ไลฟ์วันนี้สนุกมาก');
-$('crSkip').onclick = () => { speechSynthesis.cancel(); speaking = false; speakNext(); };
+$('crSkip').onclick = () => { speechSynthesis.cancel(); speakDone(); };
 $('chatTwitch').addEventListener('change', connectTwitch);
 $('chatYoutube').addEventListener('change', pollYouTube);
 $('ytApiKey').addEventListener('change', pollYouTube);

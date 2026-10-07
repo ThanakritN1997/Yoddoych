@@ -160,8 +160,44 @@ async function speedTest() {
   return { uploadMbps: +((size * streams * 8) / sec / 1e6).toFixed(1) };
 }
 
+// ---------- บันทึกการไลฟ์ (ไว้หาสาเหตุเวลาหลุด/กระตุก) ----------
+// %LOCALAPPDATA%\YoddoyHelper\logs\live-YYYY-MM-DD.log · เก็บ 14 วัน · ไม่มี Stream Key (ถูกแทนด้วย ••••)
+const LOG_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'YoddoyHelper', 'logs');
+function liveLog(line) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    const d = new Date();
+    const day = d.toISOString().slice(0, 10);
+    fs.appendFileSync(path.join(LOG_DIR, `live-${day}.log`), `${d.toLocaleTimeString('th-TH', { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')} ${line}\n`);
+  } catch {}
+}
+try {
+  for (const f of fs.readdirSync(LOG_DIR)) {
+    const p = path.join(LOG_DIR, f);
+    if (Date.now() - fs.statSync(p).mtimeMs > 14 * 86400000) fs.unlinkSync(p);
+  }
+} catch {}
+
+// ให้เบราว์เซอร์ (ที่วาดภาพ+ส่งภาพไลฟ์) ได้ซีพียูก่อนโปรแกรมทั่วไประหว่างไลฟ์ (เช่นเกมบนเครื่องเดียวกัน) → ภาพไม่กระตุก
+const BROWSERS = ['chrome.exe', 'msedge.exe'];
+function boostBrowsers(on) {
+  if (process.platform !== 'win32') return;
+  const r = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true, encoding: 'utf8' });
+  let n = 0;
+  for (const line of String(r.stdout || '').split(/\r?\n/)) {
+    const m = line.match(/^"([^"]+)","(\d+)"/);
+    if (!m || !BROWSERS.includes(m[1].toLowerCase())) continue;
+    try {
+      os.setPriority(+m[2], on ? os.constants.priority.PRIORITY_ABOVE_NORMAL : os.constants.priority.PRIORITY_NORMAL);
+      n++;
+    } catch {}
+  }
+  liveLog(`[ระบบ] ${on ? 'เพิ่ม' : 'คืน'}ลำดับความสำคัญเบราว์เซอร์ ${n} โปรเซส`);
+}
+
 // ---------- WebSocket /studio ----------
-const RELAY_MAX_BUFFER = 8 * 1024 * 1024; // ปลายทางที่ค้างเกิน ~8MB (หลายวินาที) = เน็ตไม่พอ/ค้าง → ตัดแล้วต่อใหม่
+const RELAY_MAX_BUFFER = 8 * 1024 * 1024; // ขั้นต่ำ — จริงใช้ "ข้อมูลค้างเกิน ~12 วินาที" ตามบิตเรต (ดู relayLimit)
+const relayLimit = (kbps) => Math.max(RELAY_MAX_BUFFER, ((kbps || 8000) * 1000 / 8) * 12);
 const RELAY_RETRY_MS = [1000, 2000, 3000, 5000, 8000]; // หน่วงก่อนต่อใหม่ (เพิ่มขึ้นถ้าหลุดติดกัน)
 const num = (line, key) => {
   const m = line.match(new RegExp(key + '=\\s*([\\d.]+)'));
@@ -201,6 +237,8 @@ function attach() {
       stopRecording(s);
       try { s.encoder.stdin.end(); } catch {}
       setTimeout(() => s.encoder.kill('SIGKILL'), 3000);
+      liveLog(`[จบ] ${reason}`);
+      if (s.boosted) boostBrowsers(false);
       send({ type: 'stopped', reason });
     }
 
@@ -232,17 +270,23 @@ function attach() {
         const line = s.hide(raw);
         if (line.startsWith('frame=') || line.startsWith('size=')) {
           // มีสถิติไหลออก = ส่งถึงปลายทางแล้ว
+          if (r.state !== 'live') liveLog(`[${r.name}] ออนไลน์ (ต่อครั้งที่ ${r.connects}, ใช้เวลา ${((Date.now() - r.startedAt) / 1000).toFixed(1)} วิ)`);
           r.state = 'live';
           r.kbps = num(line, 'bitrate');
           if (Date.now() - r.startedAt > 20000) r.fails = 0; // ต่อได้นานพอ → รีเซ็ตตัวนับการหลุด
           return;
         }
+        r.lastErr = [...(r.lastErr || []).slice(-2), line];
         send({ type: 'log', line: `[${r.name}] ${line}` });
       });
       proc.on('exit', (code) => {
         if (r.proc !== proc) return;
         r.proc = null;
         if (s.stopped || r.dead) return;
+        const upSec = ((Date.now() - r.startedAt) / 1000).toFixed(0);
+        liveLog(`[${r.name}] หลุด code=${code} หลังออนไลน์ ${upSec} วิ${r.killedReason ? ' · ' + r.killedReason : ''} · ข้อความล่าสุด: ${(r.lastErr || []).join(' | ') || '-'}`);
+        r.killedReason = '';
+        r.lastErr = [];
         r.state = 'error';
         r.kbps = 0;
         const wait = RELAY_RETRY_MS[Math.min(r.fails, RELAY_RETRY_MS.length - 1)];
@@ -351,8 +395,11 @@ function attach() {
         const distribute = (chunk) => {
           for (const r of s.relays) {
             if (!r.proc || !r.proc.stdin.writable) continue;
-            if (r.proc.stdin.writableLength > RELAY_MAX_BUFFER) {
+            // ค้างเกิน ~12 วินาทีของข้อมูล (ตามบิตเรตช่องนี้) = เน็ตไม่พอ/ปลายทางค้างจริง → ตัดแล้วต่อใหม่
+            // (เดิมตัดที่ 8MB ≈ 5 วิที่ 12 Mbps — เน็ตสะดุดสั้น ๆ ก็โดนตัด = หลุดโดยไม่จำเป็น)
+            if (r.proc.stdin.writableLength > relayLimit(r.tx ? r.tx.kbps : s.cfg.videoKbps)) {
               send({ type: 'log', line: `[${r.name}] ส่งไม่ทัน (อัปโหลดไม่พอหรือปลายทางค้าง) — ตัดแล้วต่อใหม่` });
+              r.killedReason = `ข้อมูลค้าง ${(r.proc.stdin.writableLength / 1e6).toFixed(1)} MB (อัปโหลดไม่พอ/ปลายทางค้าง)`;
               r.proc.kill('SIGKILL');
               continue;
             }
@@ -379,9 +426,16 @@ function attach() {
           const line = s.hide(raw);
           if (line.startsWith('frame=')) {
             const rec = s.rec && { sec: Math.round((Date.now() - s.rec.startedAt) / 1000), bytes: s.rec.bytes };
-            send({ type: 'stats', fps: num(line, 'fps'), kbps: 0, dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed'), dests: s.publicDests(), rec });
+            const st = { fps: num(line, 'fps'), dup: num(line, 'dup'), drop: num(line, 'drop'), speed: num(line, 'speed') };
+            send({ type: 'stats', ...st, kbps: 0, dests: s.publicDests(), rec });
+            // ทุก 10 วิ จดสุขภาพสตรีมลงบันทึก
+            if (!s.lastStatLog || Date.now() - s.lastStatLog > 10000) {
+              s.lastStatLog = Date.now();
+              liveLog(`[สถานะ] fps=${st.fps} speed=${st.speed}x dup=${st.dup} drop=${st.drop} · ${s.relays.map((r) => `${r.name}:${r.state}${r.kbps ? ' ' + Math.round(r.kbps) + 'k' : ''}${r.proc ? ' ค้าง ' + (r.proc.stdin.writableLength / 1e6).toFixed(1) + 'MB' : ''}`).join(', ') || 'อัดอย่างเดียว'}`);
+            }
             return;
           }
+          liveLog(`[encoder] ${line}`);
           send({ type: 'log', line: `[encoder] ${line}` });
         });
         s.encoder.on('exit', (code) => {
@@ -390,9 +444,20 @@ function attach() {
         });
         s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
 
+        liveLog(`[เริ่ม] ${cfg.width}x${cfg.height}@${cfg.fps} ${cfg.videoKbps}k ${cfg.encoder} ดีเลย์=${cfg.latency} · ปลายทาง: ${enabled.map((d) => d.name).join(', ') || '-'}${msg.record ? ' · อัดไฟล์' : ''}`);
+        if (msg.boostBrowser !== false) {
+          s.boosted = true;
+          boostBrowsers(true);
+        }
         if (msg.record) startRecording(s);
         if (enabled.length) goLive(s, enabled, msg.delaySec);
         send({ type: 'started', encoder: cfg.encoder, latency: cfg.latency, delaySec: s.delayMs / 1000, live: enabled.length > 0, dests: s.publicDests() });
+      }
+
+      // สุขภาพฝั่งเบราว์เซอร์ (ส่งมาทุก 10 วิ) → จดลงบันทึก
+      if (msg.type === 'diag' && session) {
+        liveLog(`[เบราว์เซอร์] วาด ${msg.drawFps}fps · ค้างส่ง ${(msg.buffered / 1e6).toFixed(1)}MB · ช่วงห่างข้อมูลสูงสุด ${msg.maxGap}ms${msg.hidden ? ' · แท็บถูกซ่อน/ย่อ' : ''}`);
+        return;
       }
 
       if (msg.type === 'golive' && session) {
@@ -494,6 +559,13 @@ async function handleApi(req, res) {
     const file = name && path.join(REC_DIR, path.basename(name));
     const args = file && fs.existsSync(file) ? ['/select,', file] : [REC_DIR];
     if (process.platform === 'win32') spawn('explorer.exe', args, { detached: true, stdio: 'ignore' }).unref();
+    return json(200, { ok: true });
+  }
+  // เปิดโฟลเดอร์บันทึกการไลฟ์ (POST + JSON เท่านั้น)
+  if (req.url === '/api/logs/open' && req.method === 'POST') {
+    if (!String(req.headers['content-type'] || '').startsWith('application/json')) return json(415, { error: 'json only' });
+    try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+    if (process.platform === 'win32') spawn('explorer.exe', [LOG_DIR], { detached: true, stdio: 'ignore' }).unref();
     return json(200, { ok: true });
   }
   if (req.url === '/api/encoders') {

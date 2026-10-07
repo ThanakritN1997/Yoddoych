@@ -560,6 +560,11 @@
           <label class="field">ตัวเข้ารหัส
             <select id="encoder"><option value="">กำลังตรวจ…</option></select>
           </label>
+          <label class="check small"><input id="boostBrowser" type="checkbox" checked> ระหว่างไลฟ์ให้ Chrome/ตัวส่งไลฟ์ได้ซีพียูก่อนเกม (ลดภาพกระตุกเมื่อเล่นเกมบนเครื่องเดียวกัน)</label>
+          <div class="row">
+            <button id="logOpen" class="btn small">📄 เปิดบันทึกการไลฟ์</button>
+            <span class="muted small">บันทึกว่าช่องไหนหลุดเมื่อไหร่และเพราะอะไร (ไม่มี Stream Key) · ส่งให้ผู้ดูแลช่วยดูได้</span>
+          </div>
         </section>
 
         <section class="card">
@@ -633,8 +638,8 @@
         </section>
         <section class="card">
           <h2>แชทสด</h2>
-          <label class="field">YouTube (ลิงก์ไลฟ์ หรือ Video ID)
-            <input id="chatYoutube" type="text" placeholder="https://youtube.com/live/…" autocomplete="off">
+          <label class="field">YouTube — แนะนำใส่ <b>ลิงก์ช่อง</b> (เช่น youtube.com/@ชื่อช่อง) ระบบหาไลฟ์ปัจจุบันให้เองทุกครั้ง · หรือใส่ลิงก์ไลฟ์
+            <input id="chatYoutube" type="text" placeholder="https://youtube.com/@ชื่อช่อง" autocomplete="off">
           </label>
           <label class="field">Twitch (ชื่อช่อง)
             <input id="chatTwitch" type="text" placeholder="ชื่อช่อง" autocomplete="off">

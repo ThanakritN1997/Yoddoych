@@ -955,7 +955,19 @@ ticker.onmessage = () => {
   if (now - lastDrawAt < (1000 / tickFps) * 0.6) return;
   lastDrawAt = now;
   draw();
+  diag.draws++;
 };
+// สุขภาพฝั่งเบราว์เซอร์ระหว่างส่ง → ส่งให้ Helper จดลงบันทึกทุก 10 วิ (ไว้หาสาเหตุกระตุก/หลุด)
+const diag = { draws: 0, maxGap: 0, since: performance.now() };
+setInterval(() => {
+  const sec = (performance.now() - diag.since) / 1000;
+  if (recorder && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'diag', drawFps: Math.round(diag.draws / sec), buffered: ws.bufferedAmount, maxGap: Math.round(diag.maxGap), hidden: document.hidden }));
+  }
+  diag.draws = 0;
+  diag.maxGap = 0;
+  diag.since = performance.now();
+}, 10000);
 function setTickFps(f) {
   tickFps = f;
   ticker.postMessage(f);
@@ -1249,10 +1261,52 @@ function youtubeId(s) {
   const m = s.match(/(?:v=|youtu\.be\/|\/live\/|\/video\/|\/shorts\/)([\w-]{11})/) || s.match(/^([\w-]{11})$/);
   return m ? m[1] : '';
 }
+
+// ---------- ช่อง YouTube → หาไลฟ์ที่กำลังออนแอร์ให้เอง ----------
+// ลิงก์ไลฟ์ YouTube เปลี่ยนทุกครั้งที่เริ่มไลฟ์ใหม่ → ใส่ลิงก์ช่อง (@ชื่อช่อง) ครั้งเดียว ระบบหาไลฟ์ปัจจุบันให้
+// ใช้ YouTube Data API (search ครั้งละ 100 หน่วยโควตา) → ค้นเฉพาะตอนกำลังไลฟ์ และไม่ถี่กว่า 2 นาที
+function ytChannelRef(s) {
+  s = String(s || '').trim();
+  let m = s.match(/youtube\.com\/(@[\w.\-]+)/i) || s.match(/^(@[\w.\-]+)$/);
+  if (m) return { handle: m[1] };
+  m = s.match(/youtube\.com\/channel\/(UC[\w-]{22})/i) || s.match(/^(UC[\w-]{22})$/);
+  return m ? { id: m[1] } : null;
+}
+const ytLive = { input: '', video: '', checkedAt: 0, channelId: '' };
+async function resolveYouTubeVideo(key) {
+  const input = ($('chatYoutube').value || '').trim();
+  const direct = youtubeId(input);
+  if (direct) return direct;
+  const ref = ytChannelRef(input);
+  if (!ref || !key) return '';
+  if (ytLive.input !== input) Object.assign(ytLive, { input, video: '', checkedAt: 0, channelId: ref.id || '' });
+  if (ytLive.video) return ytLive.video;
+  if (!isLive && !resumeTimer) return ''; // ไม่ได้ไลฟ์ → ไม่ค้น (ประหยัดโควตา)
+  if (Date.now() - ytLive.checkedAt < 120000) return '';
+  ytLive.checkedAt = Date.now();
+  const k = encodeURIComponent(key);
+  if (!ytLive.channelId) {
+    const j = await (await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(ref.handle)}&key=${k}`)).json();
+    if (j.error) throw new Error(j.error.message);
+    ytLive.channelId = j.items?.[0]?.id || '';
+    if (!ytLive.channelId) throw new Error('ไม่พบช่อง ' + ref.handle);
+  }
+  const j = await (await fetch(`https://www.googleapis.com/youtube/v3/search?part=id&channelId=${ytLive.channelId}&eventType=live&type=video&maxResults=1&key=${k}`)).json();
+  if (j.error) throw new Error(j.error.message);
+  ytLive.video = j.items?.[0]?.id?.videoId || '';
+  return ytLive.video;
+}
+// ไลฟ์ที่เจอจบแล้ว → ครั้งหน้าค้นใหม่
+function ytLiveEnded() {
+  if (ytChannelRef($('chatYoutube').value)) {
+    ytLive.video = '';
+    ytLive.checkedAt = 0;
+  }
+}
 const CHAT_SOURCES = {
   youtube: {
-    embed: (v) => { const id = youtubeId(v); return id && `https://www.youtube.com/live_chat?v=${id}&embed_domain=${host}&dark_theme=1`; },
-    popout: (v) => { const id = youtubeId(v); return id && `https://www.youtube.com/live_chat?is_popout=1&v=${id}`; },
+    embed: (v) => { const id = youtubeId(v) || ytLive.video; return id && `https://www.youtube.com/live_chat?v=${id}&embed_domain=${host}&dark_theme=1`; },
+    popout: (v) => { const id = youtubeId(v) || ytLive.video; return id && `https://www.youtube.com/live_chat?is_popout=1&v=${id}`; },
   },
   twitch: {
     embed: (v) => v && `https://www.twitch.tv/embed/${encodeURIComponent(v.trim())}/chat?parent=${host}&darkpopout`,
@@ -1690,6 +1744,7 @@ let liveStart = 0;
 let recStart = 0;
 let clock = null;
 let slowSince = 0;
+let lowFpsSince = 0;
 // กู้ไลฟ์อัตโนมัติ: ผู้ใช้ยังตั้งใจไลฟ์/อัดอยู่ แต่ระบบหลุด (Helper ปิด/ค้าง, ตัวเข้ารหัสดับ, เบราว์เซอร์หยุดบันทึก)
 let wantLive = false;
 let wantRec = false;
@@ -1859,10 +1914,17 @@ $('viewerSplit').checked = store.get('viewerSplit', true);
 $('viewerSplit').onchange = () => store.set('viewerSplit', $('viewerSplit').checked);
 async function pollViewers() {
   const key = $('ytApiKey').value.trim();
-  const id = youtubeId($('chatYoutube').value);
+  let id = '';
+  try {
+    id = await resolveYouTubeVideo(key);
+  } catch (e) {
+    $('viewerStatus').textContent = '⚠️ หาไลฟ์ YouTube ไม่ได้: ' + e.message;
+  }
   if (!key || !id) {
     delete viewerData.youtube;
-    $('viewerStatus').textContent = key ? 'ใส่ลิงก์ไลฟ์ YouTube ในช่องด้านล่าง' : '';
+    if (!key) $('viewerStatus').textContent = '';
+    else if (ytChannelRef($('chatYoutube').value)) $('viewerStatus').textContent = isLive ? 'กำลังหาไลฟ์ที่ออนแอร์ในช่องนี้… (YouTube ใช้เวลา ~30 วิหลังเริ่มไลฟ์)' : 'จะหาไลฟ์ให้เองเมื่อกดเริ่มไลฟ์';
+    else if (!$('viewerStatus').textContent.startsWith('⚠️')) $('viewerStatus').textContent = 'ใส่ลิงก์ช่อง YouTube (@ชื่อช่อง) หรือลิงก์ไลฟ์ ในช่องด้านล่าง';
     return renderViewers();
   }
   try {
@@ -1874,6 +1936,7 @@ async function pollViewers() {
     const live = it.liveStreamingDetails || {};
     viewerData.youtube = { name: 'YouTube', platform: 'YouTube', viewers: +(live.concurrentViewers || 0), likes: +(it.statistics?.likeCount || 0), live: !!live.concurrentViewers, at: Date.now() };
     $('viewerStatus').textContent = live.concurrentViewers ? `อัปเดต ${new Date().toLocaleTimeString('th-TH')}` : 'ไลฟ์นี้ยังไม่ออนแอร์ หรือจบแล้ว';
+    if (live.actualEndTime) ytLiveEnded();
   } catch (e) {
     delete viewerData.youtube;
     $('viewerStatus').textContent = '⚠️ ดึงยอดคนดูไม่ได้: ' + e.message;
@@ -1958,18 +2021,45 @@ function renderChips(list) {
   }).join('');
 }
 
-function showAdvice(text) {
+// offer30 = มีปุ่ม "ลดเป็น 30fps ตอนนี้" (เครื่องไม่ไหว → ภาพกระตุก)
+function showAdvice(text, offer30) {
+  if ($('advice').dataset.text === text + offer30) return; // ไม่วาดซ้ำทุกวินาที (ปุ่มจะกดไม่ติด)
+  $('advice').dataset.text = text + offer30;
   $('advice').textContent = text;
   $('advice').hidden = !text;
+  if (offer30 && plan && plan.fps > 30) {
+    const b = document.createElement('button');
+    b.className = 'btn small primary';
+    b.textContent = '⚡ ลดเป็น 30fps ตอนนี้';
+    b.style.marginLeft = '8px';
+    b.onclick = switchTo30;
+    $('advice').append(b);
+  }
+}
+// เปลี่ยนเป็น 30fps ระหว่างไลฟ์: ปิดรอบนี้แล้วระบบกู้ไลฟ์เริ่มใหม่ให้เอง (~3 วิ) ด้วยค่าใหม่
+function switchTo30() {
+  const res = plan.height > plan.width ? plan.width : plan.height;
+  $('manual').checked = true;
+  $('manualBox').hidden = false;
+  $('res').value = String(res);
+  $('fps').value = '30';
+  $('vkbps').value = String(plan.videoKbps);
+  showAdvice('');
+  toast('⚡ เปลี่ยนเป็น 30fps — ไลฟ์จะกลับมาในไม่กี่วินาที');
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+  stopPipeline('เปลี่ยนเป็น 30fps', { resume: true });
 }
 
 function advise(m) {
   if (!plan || Date.now() - liveStart < 5000) return;
   if (m.speed && m.speed < 0.95) {
     slowSince = slowSince || Date.now();
-    if (Date.now() - slowSince > 4000) return showAdvice('เครื่องเข้ารหัสไม่ทัน (ความเร็ว < 1.0x) — เปลี่ยนเป็นตัวเข้ารหัสการ์ดจอ หรือลดความละเอียด/fps');
+    if (Date.now() - slowSince > 4000) return showAdvice('เครื่องเข้ารหัสไม่ทัน (ความเร็ว < 1.0x) — ภาพจะกระตุก/หลุด', true);
   } else slowSince = 0;
-  if (m.fps && m.fps < plan.fps * 0.85) return showAdvice('ภาพเข้ามาไม่ถึงเฟรมเรตที่ตั้ง — อย่าย่อหน้าต่างเบราว์เซอร์นี้ หรือลด fps');
+  if (m.fps && m.fps < plan.fps * 0.85) {
+    lowFpsSince = lowFpsSince || Date.now();
+    if (Date.now() - lowFpsSince > 8000) return showAdvice(`เครื่องวาดภาพไม่ทัน (${Math.round(m.fps)}/${plan.fps} fps) — ปิดโปรแกรมที่ไม่ใช้ อย่าย่อหน้าต่างนี้`, true);
+  } else lowFpsSince = 0;
   if (ws.bufferedAmount > 8e6) return showAdvice('ข้อมูลค้างระหว่างเบราว์เซอร์กับเซิร์ฟเวอร์ — ลดบิตเรต');
   showAdvice('');
 }
@@ -2057,7 +2147,11 @@ async function startPipeline({ destinations, record }) {
     audioBitsPerSecond: 192000,
   });
   // ส่ง Blob ตรง ๆ: WebSocket รับประกันลำดับ (ถ้า await arrayBuffer() ก่อน ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)
+  let lastChunkAt = performance.now();
   recorder.ondataavailable = (e) => {
+    const now = performance.now();
+    diag.maxGap = Math.max(diag.maxGap, now - lastChunkAt); // ช่วงที่เบราว์เซอร์ไม่ได้ส่งภาพ (ยิ่งนาน ยิ่งกระตุก)
+    lastChunkAt = now;
     if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
   };
   recorder.onerror = (e) => {
@@ -2076,6 +2170,7 @@ async function startPipeline({ destinations, record }) {
     delaySec: delaySec(),
     destinations: destinations || [],
     record: !!record,
+    boostBrowser: $('boostBrowser').checked,
   }));
   recorder.start(RECORDER_SLICE[$('latency').value] || 250);
   clearInterval(clock);
@@ -2090,6 +2185,12 @@ function beginLiveUi() {
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
   isLive = true;
   liveStart = Date.now();
+  // YouTube เปิดไลฟ์ฝั่งตัวเองหลังได้ภาพ ~20–30 วิ → ค่อยหาไลฟ์ในช่อง แล้วเริ่มรับแชท/ยอดคนดู
+  ytLiveEnded();
+  setTimeout(() => {
+    pollViewers();
+    if (typeof pollYouTube === 'function') pollYouTube();
+  }, 25000);
 }
 
 async function startLive() {
@@ -2175,6 +2276,9 @@ function stopRec() {
 // opts.resume = หลุดเพราะระบบ (ไม่ใช่ผู้ใช้กดหยุด) → ลองเริ่มใหม่อัตโนมัติ
 function stopPipeline(reason, opts = {}) {
   const was = !!recorder;
+  // ไม่มีอะไรกำลังส่งอยู่แล้ว (เช่น Helper ตอบ "stopped" หลังเราสั่งปิดเพื่อเริ่มใหม่) → ไม่ต้องทำอะไร
+  // ห้ามล้าง wantLive ตรงนี้ ไม่งั้นระบบกู้ไลฟ์ที่ตั้งเวลาไว้จะถูกยกเลิก
+  if (!was) return updateOutputUi();
   if (recorder && recorder.state !== 'inactive') {
     recorder.ondataavailable = null;
     recorder.onerror = null;
@@ -2269,6 +2373,9 @@ function lockSettings() {
 }
 
 // ---------- ไฟล์ที่อัดไว้ ----------
+$('boostBrowser').checked = store.get('boostBrowser', true);
+$('boostBrowser').onchange = () => store.set('boostBrowser', $('boostBrowser').checked);
+$('logOpen').onclick = () => H && fetch(H.base + '/api/logs/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
 $('recWithLive').checked = store.get('recWithLive', false);
 $('recWithLive').onchange = () => store.set('recWithLive', $('recWithLive').checked);
 async function loadRecordings() {

@@ -56,14 +56,26 @@ function onLine(line) {
   }
 }
 
+// ผู้ใช้ต้องการให้ตัวรับภาพเปิดอยู่ → ถ้า UxPlay ดับเอง เปิดใหม่ให้อัตโนมัติ
+let wanted = false;
+let restarts = [];
+
 function start() {
+  wanted = true;
   if (proc) return status();
   if (!installed()) return { ...status(), error: 'ไม่พบ UxPlay ที่ ' + UXPLAY_DIR };
   // ปิดตัวที่เปิดค้างไว้ (เช่นจาก start.bat เดิม) เพื่อไม่ให้พอร์ตชนกัน
   killAll();
   const UXPLAY = pickUxplay();
 
-  const args = ['-n', NAME, '-nh', '-p', '-nohold', '-vs', 'd3d12videosink'];
+  const args = ['-n', NAME, '-nh', '-p', '-nohold',
+    // ไม่ตัดการเชื่อมต่อเมื่อจอ iPhone นิ่ง (ค่าเดิม: นิ่ง 15 วิ = ตัดทิ้ง → หลุดตอนอยู่หน้าเมนูเกม/หน้าจอไม่ขยับ)
+    '-reset', '0',
+    // iPhone หลุด/หยุดสะท้อน → หน้าต่างภาพยังอยู่ เบราว์เซอร์ที่จับภาพหน้าต่างนี้ไม่ต้องเลือกจอใหม่ ต่อ iPhone กลับมาภาพก็มาเอง
+    '-nc',
+    // รับภาพจาก iPhone สูงสุด 60 fps (ค่าเดิม 30) ให้เกมลื่นเท่าที่ไลฟ์
+    '-fps', '60',
+    '-vs', 'd3d12videosink'];
   const mac = lanMac();
   if (mac) args.push('-m', mac);
 
@@ -84,8 +96,21 @@ function start() {
   };
   p.stdout.on('data', read);
   p.stderr.on('data', read);
-  p.on('exit', () => {
-    if (proc === p) proc = null;
+  p.on('exit', (code) => {
+    if (proc !== p) return;
+    proc = null;
+    if (!wanted) return;
+    // ดับเองโดยผู้ใช้ไม่ได้สั่งปิด → เปิดใหม่ (ไม่เกิน 5 ครั้ง/นาที กันวนไม่จบถ้าเครื่องมีปัญหาจริง)
+    const now = Date.now();
+    restarts = restarts.filter((t) => now - t < 60000);
+    if (restarts.length >= 5) {
+      state.lastLine = `UxPlay ดับซ้ำหลายครั้ง (code ${code}) — กดเริ่มสะท้อนหน้าจอใหม่`;
+      wanted = false;
+      return;
+    }
+    restarts.push(now);
+    console.log(`[สะท้อนจอ] UxPlay ดับ (code ${code}) — เปิดใหม่อัตโนมัติ`);
+    setTimeout(() => wanted && !proc && start(), 2000);
   });
   p.on('error', (e) => {
     state.lastLine = e.message;
@@ -95,6 +120,7 @@ function start() {
 }
 
 function stop() {
+  wanted = false;
   if (proc) proc.kill();
   proc = null;
   killAll();
