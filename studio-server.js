@@ -223,6 +223,7 @@ function eachLine(stream, fn) {
 // ไม่มีทั้งไลฟ์และอัดไฟล์เหลืออยู่ → ปิดตัวเข้ารหัสเอง
 // ไลฟ์/อัดไฟล์ที่กำลังทำงาน (ห้ามอัปเดต Helper ระหว่างนี้)
 const activeSessions = new Set();
+const recordingNow = new Set(); // ชื่อไฟล์ที่กำลังอัดอยู่ (ห้ามลบ)
 const busy = () => activeSessions.size > 0;
 
 function attach() {
@@ -333,9 +334,11 @@ function attach() {
       const proc = boost(spawn(FFMPEG, recordArgs(file), { windowsHide: true }));
       const rec = { proc, file, bytes: 0, startedAt: Date.now() };
       s.rec = rec;
+      recordingNow.add(path.basename(file));
       proc.stdin.on('error', () => {});
       eachLine(proc.stderr, (line) => send({ type: 'log', line: `[อัดไฟล์] ${line}` }));
       proc.on('exit', (code) => {
+        recordingNow.delete(path.basename(file));
         if (s.rec === rec) {
           // ตัวอัดดับเอง (ดิสก์เต็ม ฯลฯ) — ไลฟ์ยังไปต่อ
           s.rec = null;
@@ -544,16 +547,44 @@ async function handleApi(req, res) {
       return json(400, { error: e.message });
     }
   }
-  // ไฟล์ที่อัดไว้ล่าสุด
+  // ไฟล์ที่อัดไว้ทั้งหมดในเครื่อง (ใหม่สุดก่อน) + พื้นที่ว่างของดิสก์
   if (req.url === '/api/recordings' && req.method === 'GET') {
     let files = [];
     try {
       files = fs.readdirSync(REC_DIR).filter((f) => /\.mp4$/i.test(f)).map((f) => {
         const st = fs.statSync(path.join(REC_DIR, f));
-        return { name: f, bytes: st.size, mtime: st.mtimeMs };
-      }).sort((a, b) => b.mtime - a.mtime).slice(0, 20);
+        return { name: f, bytes: st.size, mtime: st.mtimeMs, recording: recordingNow.has(f) };
+      }).sort((a, b) => b.mtime - a.mtime).slice(0, 300);
     } catch {}
-    return json(200, { dir: REC_DIR, files });
+    let freeBytes = null;
+    try {
+      const sf = fs.statfsSync(fs.existsSync(REC_DIR) ? REC_DIR : os.homedir());
+      freeBytes = sf.bavail * sf.bsize;
+    } catch {}
+    return json(200, { dir: REC_DIR, files, freeBytes });
+  }
+  // ลบไฟล์อัด → ย้ายไปถังขยะ (กู้คืนได้) · เฉพาะ .mp4 ในโฟลเดอร์ไฟล์อัด · ห้ามลบไฟล์ที่กำลังอัด · POST + JSON เท่านั้น
+  if (req.url === '/api/recordings/delete' && req.method === 'POST') {
+    if (!String(req.headers['content-type'] || '').startsWith('application/json')) return json(415, { error: 'json only' });
+    let body = '';
+    for await (const c of req) if ((body += c).length > 4096) return json(413, {});
+    let name = '';
+    try { name = path.basename(String(JSON.parse(body || '{}').name || '')); } catch {}
+    if (!/^[^\\/:*?"<>|]+\.mp4$/i.test(name)) return json(400, { error: 'ชื่อไฟล์ไม่ถูกต้อง' });
+    if (recordingNow.has(name)) return json(409, { error: 'ไฟล์นี้กำลังอัดอยู่ — หยุดอัดก่อนแล้วค่อยลบ' });
+    const file = path.join(REC_DIR, name);
+    if (!fs.existsSync(file)) return json(404, { error: 'ไม่พบไฟล์นี้ในเครื่องแล้ว' });
+    if (process.platform === 'win32') {
+      // ส่งชื่อไฟล์ผ่านตัวแปรสภาพแวดล้อม (ไม่ต่อเป็นคำสั่ง) กันชื่อไฟล์แปลก ๆ ถูกตีความเป็นคำสั่ง
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const r = spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command',
+        "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:YD_DELETE_FILE, 'OnlyErrorDialogs', 'SendToRecycleBin')"],
+      { windowsHide: true, timeout: 20000, env: { ...process.env, YD_DELETE_FILE: file } });
+      if (r.status !== 0 || fs.existsSync(file)) return json(500, { error: 'ลบไม่สำเร็จ (ไฟล์อาจเปิดอยู่ในโปรแกรมอื่น)' });
+      return json(200, { ok: true, recycled: true });
+    }
+    fs.unlinkSync(file);
+    return json(200, { ok: true, recycled: false });
   }
   // เปิดโฟลเดอร์ไฟล์อัดใน Explorer — POST + JSON เท่านั้น (เว็บอื่นยิงมาแบบ <img>/ฟอร์มไม่ได้)
   if (req.url === '/api/recordings/open' && req.method === 'POST') {

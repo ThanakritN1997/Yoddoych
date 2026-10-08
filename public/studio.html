@@ -594,7 +594,12 @@
             <span class="muted small">กดตอนมีช่วงเด็ด จะจดเวลาไว้ให้ตัดเป็นคลิปสั้นทีหลัง</span>
           </div>
           <div id="markList" class="rec-list"></div>
-          <div id="recList" class="rec-list"></div>
+          <div class="row">
+            <b class="small">ไฟล์ในเครื่อง</b>
+            <span id="recSummary" class="muted small"></span>
+            <button id="recRefresh" class="btn small" type="button">↻</button>
+          </div>
+          <div id="recList" class="rec-list rec-scroll"></div>
           <div class="row">
             <button id="recOpen" class="btn small">📂 เปิดโฟลเดอร์</button>
             <span id="recDir" class="muted small"></span>

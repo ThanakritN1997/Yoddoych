@@ -437,3 +437,8 @@ body.studio-page {
 .vb-screen.on { color: #fff; background: rgba(255, 59, 92, .18); border-color: rgba(255, 59, 92, .5); }
 @media (max-width: 900px) { .vb-split { display: none; } }
 @media (max-width: 640px) { .vb-screen { display: none; } .viewer-bar { padding: 4px 10px; } }
+
+/* ---------- รายการไฟล์อัดในเครื่อง ---------- */
+.rec-scroll { max-height: 320px; overflow-y: auto; }
+.rec-row.recording { border-color: rgba(255, 77, 94, .5); }
+.rec-row .btn.small { padding: 4px 9px; }

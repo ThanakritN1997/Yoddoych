@@ -2407,26 +2407,52 @@ async function loadRecordings() {
     return;
   }
   try {
-    const j = await (await fetch(H.base + '/api/recordings')).json();
+    const j = await (await fetch(H.base + '/api/recordings', { cache: 'no-store' })).json();
+    const total = j.files.reduce((s, f) => s + f.bytes, 0);
     $('recDir').textContent = 'เก็บไว้ที่ ' + j.dir;
+    $('recSummary').textContent = j.files.length
+      ? `ในเครื่องมี ${j.files.length} ไฟล์ · รวม ${fmtBytes(total)}${j.freeBytes != null ? ` · ดิสก์เหลือว่าง ${fmtBytes(j.freeBytes)}` : ''}`
+      : '';
     $('recList').innerHTML = '';
-    for (const f of j.files.slice(0, 8)) {
+    for (const f of j.files) {
       const row = document.createElement('div');
-      row.className = 'rec-row';
-      row.innerHTML = '<span class="rec-name"></span><span class="muted small"></span><button class="btn small">เปิด</button>';
-      row.querySelector('.rec-name').textContent = f.name.replace(/^Yoddoy-|\.mp4$/g, '').replace('_', ' ');
+      row.className = 'rec-row' + (f.recording ? ' recording' : '');
+      row.innerHTML = '<span class="rec-name"></span><span class="muted small"></span><button class="btn small">เปิด</button><button class="btn small danger-text" aria-label="ลบไฟล์">🗑</button>';
+      const d = new Date(f.mtime);
+      row.querySelector('.rec-name').textContent = (f.recording ? '⏺ กำลังอัด · ' : '') + d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+      row.querySelector('.rec-name').title = f.name;
       row.querySelector('.muted').textContent = fmtBytes(f.bytes);
-      row.querySelector('button').onclick = () => openRecFolder(f.name);
+      const [openBtn, delBtn] = row.querySelectorAll('button');
+      openBtn.onclick = () => openRecFolder(f.name);
+      delBtn.disabled = f.recording;
+      delBtn.title = f.recording ? 'กำลังอัดอยู่ — หยุดอัดก่อน' : 'ลบไฟล์นี้ออกจากเครื่อง (ไปที่ถังขยะ)';
+      delBtn.onclick = () => deleteRecording(f, row);
       $('recList').append(row);
     }
-    if (!j.files.length) $('recList').innerHTML = '<p class="muted small">ยังไม่มีไฟล์</p>';
+    if (!j.files.length) $('recList').innerHTML = '<p class="muted small">ยังไม่มีไฟล์อัดในเครื่อง</p>';
   } catch {}
+}
+async function deleteRecording(f, row) {
+  const when = new Date(f.mtime).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  if (!confirm(`ลบไฟล์อัดวันที่ ${when} (${fmtBytes(f.bytes)}) ออกจากเครื่อง?\n\nไฟล์จะไปอยู่ในถังขยะ (Recycle Bin) — กู้คืนได้จนกว่าจะล้างถังขยะ`)) return;
+  row.style.opacity = 0.5;
+  try {
+    const r = await (await fetch(H.base + '/api/recordings/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name }) })).json();
+    if (r.error) throw new Error(r.error);
+    toast(r.recycled ? '🗑 ลบแล้ว — ย้ายไปถังขยะ (กู้คืนได้)' : '🗑 ลบแล้ว');
+  } catch (e) {
+    toast('ลบไม่สำเร็จ: ' + e.message);
+  }
+  loadRecordings();
 }
 function openRecFolder(name) {
   if (!H) return;
   fetch(H.base + '/api/recordings/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name || '' }) }).catch(() => {});
 }
 $('recOpen').onclick = () => openRecFolder('');
+$('recRefresh').onclick = loadRecordings;
+// เปิดแท็บคุณภาพ → โหลดรายการไฟล์ใหม่ (เผื่อลบ/ย้ายไฟล์จากที่อื่น)
+document.querySelector('.tabs [data-tab="quality"]').addEventListener('click', () => loadRecordings());
 
 $('btnLive').onclick = () => {
   if (resumeTimer) { // ยกเลิกการกู้ไลฟ์
