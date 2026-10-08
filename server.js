@@ -19,6 +19,8 @@ const MIME = {
 };
 
 const VERSION = require('./package.json').version;
+// ชื่อหน้าต่าง Helper บอกเวอร์ชัน (เช่น "Yoddoy Helper 1.5.4")
+if (process.env.HELPER) process.title = `Yoddoy Helper ${VERSION}`;
 // เว็บที่อนุญาตให้สั่ง Helper บนเครื่องนี้ได้ (นอกจาก localhost)
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://yoddoych.vercel.app').split(',').map((s) => s.trim()).filter(Boolean);
 // บน Vercel/โฮสต์ที่มี proxy คำขอจะมาจาก 127.0.0.1 เสมอ → ปิดสตูดิโอ/API ทั้งหมด

@@ -9,7 +9,8 @@ window.versionLess = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
   return false;
 };
-window.HELPER_DOWNLOAD = 'https://github.com/ThanakritN1997/Yoddoych/releases/latest/download/YoddoyHelper-win64.zip';
+// ไฟล์ดาวน์โหลดมีเลขเวอร์ชันในชื่อ (เช่น YoddoyHelper-1.5.4-win64.zip) — ทุกครั้งที่ออกเวอร์ชันใหม่ HELPER_MIN_VERSION = เวอร์ชันล่าสุด
+window.HELPER_DOWNLOAD = `https://github.com/ThanakritN1997/Yoddoych/releases/download/v${window.HELPER_MIN_VERSION}/YoddoyHelper-${window.HELPER_MIN_VERSION}-win64.zip`;
 window.IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
 
 async function findHelper() {
