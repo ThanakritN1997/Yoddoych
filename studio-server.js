@@ -221,6 +221,10 @@ function eachLine(stream, fn) {
 //   record  { on } → เริ่ม/หยุดอัดไฟล์ระหว่างไลฟ์
 //   stop    → หยุดทั้งหมด
 // ไม่มีทั้งไลฟ์และอัดไฟล์เหลืออยู่ → ปิดตัวเข้ารหัสเอง
+// ไลฟ์/อัดไฟล์ที่กำลังทำงาน (ห้ามอัปเดต Helper ระหว่างนี้)
+const activeSessions = new Set();
+const busy = () => activeSessions.size > 0;
+
 function attach() {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
 
@@ -232,6 +236,7 @@ function attach() {
       if (!session) return;
       const s = session;
       session = null;
+      activeSessions.delete(s);
       s.stopped = true;
       clearInterval(s.delayTimer);
       killRelays(s);
@@ -390,6 +395,7 @@ function attach() {
 
         s.encoder = boost(spawn(FFMPEG, encoderArgs(cfg), { windowsHide: true }));
         session = s;
+        activeSessions.add(s);
         s.encoder.stdin.on('error', () => {});
 
         // แจกข้อมูลที่บีบอัดแล้วให้ทุกปลายทาง — ปลายทางที่ค้างจะไม่ฉุดตัวอื่น
@@ -582,4 +588,4 @@ async function handleApi(req, res) {
   return false;
 }
 
-module.exports = { attach, handleApi, detectEncoders, _test: { encoderArgs, relayArgs, recordArgs, REC_DIR, FFMPEG } };
+module.exports = { attach, handleApi, detectEncoders, busy, _test: { encoderArgs, relayArgs, recordArgs, REC_DIR, FFMPEG } };

@@ -6,6 +6,8 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 const studio = require('./studio-server');
 const mirror = require('./mirror-server');
+const updater = require('./updater');
+if (process.env.HELPER) updater.cleanup();
 
 const PORT = process.env.PORT || (process.env.HELPER ? 47800 : 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -62,7 +64,33 @@ const server = http.createServer(async (req, res) => {
     cors(req, res);
     if (req.method === 'OPTIONS') return res.writeHead(204).end();
     if (req.url === '/api/helper') {
-      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ helper: true, version: VERSION }));
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ helper: true, version: VERSION, update: !!process.env.HELPER }));
+    }
+    // ---------- อัปเดตในตัว ----------
+    if (req.url === '/api/update/check' && req.method === 'GET') {
+      try {
+        const c = await updater.check(VERSION);
+        delete c.manifest;
+        return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(c));
+      } catch (e) {
+        return res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'เช็กอัปเดตไม่ได้: ' + e.message }));
+      }
+    }
+    if (req.url === '/api/update/apply' && req.method === 'POST') {
+      const send = (code, obj) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(obj));
+      if (!String(req.headers['content-type'] || '').startsWith('application/json')) return send(415, { error: 'json only' });
+      if (studio.busy()) return send(409, { error: 'กำลังไลฟ์หรืออัดไฟล์อยู่ — หยุดก่อนแล้วค่อยอัปเดต' });
+      try {
+        const r = await updater.apply(VERSION);
+        send(200, r);
+        if (r.ok) {
+          console.log(`\n${r.message}\n`);
+          setTimeout(() => process.exit(updater.RESTART_CODE), 800); // YoddoyHelper.bat เปิดใหม่ให้ในหน้าต่างเดิม
+        }
+      } catch (e) {
+        send(500, { error: 'อัปเดตไม่สำเร็จ: ' + e.message });
+      }
+      return;
     }
     const api = req.url.startsWith('/api/mirror') ? mirror : studio;
     if ((await api.handleApi(req, res)) === false) res.writeHead(404).end();
@@ -212,6 +240,10 @@ server.listen(PORT, process.env.HELPER ? '127.0.0.1' : undefined, () => {
     console.log(`  เปิดสตูดิโอ: ${ALLOWED_ORIGINS[0]}/studio.html`);
     console.log(`  (หรือใช้ในเครื่อง: http://localhost:${PORT}/studio.html)\n`);
     setTimeout(() => console.log('  ตัวเข้ารหัสที่ใช้ได้: ' + studio.detectEncoders().map((e) => e.id).join(', ')), 100);
+    // บอกในหน้าต่างถ้ามีเวอร์ชันใหม่ (กดอัปเดตได้ในหน้าสตูดิโอ)
+    updater.check(VERSION).then((c) => {
+      if (c.available) console.log(`\n  ★ มีเวอร์ชันใหม่ ${c.latest} — กด "อัปเดตอัตโนมัติ" ในหน้าสตูดิโอ${c.needsFull ? ' (ครั้งนี้ต้องดาวน์โหลดตัวเต็ม)' : ''}\n`);
+    }).catch(() => {});
     return;
   }
   console.log(`\nเว็บสะท้อนหน้าจอพร้อมใช้งาน`);

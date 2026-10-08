@@ -2496,11 +2496,57 @@ window.helper.then((h) => {
     $('helperUpdate').hidden = false;
     $('helperVer').textContent = h.version || 'เก่า';
     $('helperUpdateLink').href = window.HELPER_DOWNLOAD;
+    // Helper 1.5.5 ขึ้นไปอัปเดตตัวเองได้ → ปุ่มเดียว ไม่ต้องดาวน์โหลด/แตกไฟล์ใหม่
+    if (h.update) {
+      $('helperAutoUpdate').hidden = false;
+      $('helperUpdateLink').classList.remove('primary');
+      $('helperUpdateLink').textContent = '⬇ หรือดาวน์โหลดตัวเต็ม';
+    }
   }
   connect();
   loadEncoders();
   loadRecordings();
 });
+// ---------- อัปเดต Helper อัตโนมัติ ----------
+$('helperAutoUpdate').onclick = async () => {
+  if (!H) return;
+  if (recorder) return toast('หยุดไลฟ์/อัดไฟล์ก่อน แล้วค่อยอัปเดต');
+  const b = $('helperAutoUpdate');
+  const say = (t) => ($('helperUpdateStatus').textContent = t);
+  b.disabled = true;
+  say('กำลังดาวน์โหลดและตรวจไฟล์อัปเดต…');
+  try {
+    const r = await (await fetch(H.base + '/api/update/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    if (r.error) throw new Error(r.error);
+    if (r.needsFull) {
+      say('⚠️ ' + r.message);
+      $('helperUpdateLink').href = r.fullUrl || window.HELPER_DOWNLOAD;
+      $('helperUpdateLink').classList.add('primary');
+      b.disabled = false;
+      return;
+    }
+    if (!r.ok) throw new Error(r.message);
+    say(`✅ ${r.message}…`);
+    // รอ Helper เปิดใหม่ด้วยเวอร์ชันใหม่ แล้วโหลดหน้าใหม่
+    const until = Date.now() + 45000;
+    while (Date.now() < until) {
+      await new Promise((res) => setTimeout(res, 1500));
+      try {
+        const h = await (await fetch(H.base + '/api/helper', { cache: 'no-store' })).json();
+        if (h.version === r.version) {
+          say(`✅ อัปเดตเป็น ${h.version} เรียบร้อย — กำลังโหลดหน้าใหม่`);
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
+      } catch {}
+    }
+    throw new Error('Helper ยังไม่กลับมา — ดูที่หน้าต่าง Yoddoy Helper');
+  } catch (e) {
+    say('⚠️ ' + e.message);
+    b.disabled = false;
+  }
+};
+
 // ติดตั้ง Helper เสร็จแล้วกลับมาที่แท็บนี้ → ลองหาใหม่อัตโนมัติ
 window.addEventListener('focus', async () => {
   if (H || window.IS_MOBILE) return;
