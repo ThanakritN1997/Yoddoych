@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 // ---------- แพลตฟอร์ม ----------
 // max = บิตเรตวิดีโอสูงสุดที่แนะนำโดยประมาณ (kbps) · orient = แนวภาพที่แพลตฟอร์มนั้นเหมาะ (h แนวนอน / v แนวตั้ง)
 const PLATFORMS = {
-  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 12000, orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
+  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, /* เกินนี้ YouTube เตือน "สูงกว่าที่แนะนำ" */ orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
   facebook: { name: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', max: 9000, orient: 'h', help: 'Facebook → วิดีโอสด → ซอฟต์แวร์สตรีม → คัดลอก “คีย์สตรีม”' },
   tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key · ไม่มี Stream Key? ใช้ปุ่ม “เปิดจอสำหรับ LIVE Studio” แทน' },
   instagram: { name: 'Instagram', url: '', max: 6000, orient: 'v', help: 'instagram.com บนคอม → สร้าง → วิดีโอสด → คัดลอก Stream URL และ Stream key' },
@@ -17,7 +17,7 @@ const PLATFORMS = {
 
 // ระดับคุณภาพ: min = บิตเรตต่ำสุดที่ยังดูดี, rec = บิตเรตที่แนะนำ
 const TIERS = [
-  { label: '1080p 60fps', h: 1080, fps: 60, min: 6000, rec: 12000 }, // YouTube แนะนำ 12 Mbps สำหรับ 1080p60
+  { label: '1080p 60fps', h: 1080, fps: 60, min: 6000, rec: 7500 }, // YouTube Studio แนะนำ ~6800 (เกินมากจะขึ้นเตือน) · ภาพคมพอด้วยตัวเข้ารหัสคุณภาพสูง
   { label: '1080p 30fps', h: 1080, fps: 30, min: 4500, rec: 6000 },
   { label: '720p 60fps', h: 720, fps: 60, min: 4000, rec: 5000 },
   { label: '720p 30fps', h: 720, fps: 30, min: 2500, rec: 3500 },
@@ -104,7 +104,9 @@ function calc() {
   // แต่ละปลายทางรับบิตเรตได้ไม่เท่ากัน: ภาพหลักใช้เพดานของช่องที่รับได้สูงสุด
   // ช่องที่รับได้ต่ำกว่า (เช่น TikTok/Restream 6000) → Helper บีบอัดสำเนาแยกให้ ไม่ฉุดคุณภาพช่องอื่น
   const caps = active.length ? active.map((d) => Math.min(20000, (PLATFORMS[d.platform] || PLATFORMS.custom).max)) : [20000];
-  const cap = Math.max(...caps);
+  // Helper เก่า (< 1.5.2) ทำสำเนาแยกต่อช่องไม่ได้ → ทุกช่องได้บิตเรตเท่ากัน → ต้องไม่เกินช่องที่รับได้ต่ำสุด (ไม่งั้น TikTok/Restream หลุด)
+  const perDestOk = !H || !window.versionLess(H.version, '1.5.2');
+  const cap = perDestOk ? Math.max(...caps) : Math.min(...caps);
   const budgetUp = upMbps * 1000 * HEADROOM;
   const upFor = (k) => caps.reduce((sum, c) => sum + Math.min(k, c) + audio, 0); // อัปโหลดรวมที่ต้องใช้ถ้าภาพหลัก = k kbps
   const vertical = $('orient').value === 'v';
@@ -1272,14 +1274,28 @@ function ytChannelRef(s) {
   m = s.match(/youtube\.com\/channel\/(UC[\w-]{22})/i) || s.match(/^(UC[\w-]{22})$/);
   return m ? { id: m[1] } : null;
 }
-const ytLive = { input: '', video: '', checkedAt: 0, channelId: '' };
+const ytLive = { input: '', video: '', checkedAt: 0, channelId: '', linkChecked: '' };
 async function resolveYouTubeVideo(key) {
   const input = ($('chatYoutube').value || '').trim();
   const direct = youtubeId(input);
-  if (direct) return direct;
-  const ref = ytChannelRef(input);
+  let ref = ytChannelRef(input);
+  if (direct) {
+    // ลิงก์ไลฟ์: ยังออนแอร์อยู่ → ใช้เลย · จบไปแล้ว (ลิงก์เก่า) → หาไลฟ์ปัจจุบันของช่องเดียวกันให้เอง
+    if (ytLive.linkChecked !== direct) {
+      if (!key) return direct;
+      const j = await (await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${direct}&key=${encodeURIComponent(key)}`)).json();
+      if (j.error) throw new Error(j.error.message);
+      const it = j.items?.[0];
+      ytLive.linkChecked = direct;
+      ytLive.linkLive = !!(it && it.liveStreamingDetails && !it.liveStreamingDetails.actualEndTime);
+      ytLive.linkChannel = it?.snippet?.channelId || '';
+    }
+    if (ytLive.linkLive || !ytLive.linkChannel) return direct;
+    ref = { id: ytLive.linkChannel };
+  }
   if (!ref || !key) return '';
-  if (ytLive.input !== input) Object.assign(ytLive, { input, video: '', checkedAt: 0, channelId: ref.id || '' });
+  const refKey = ref.id || ref.handle;
+  if (ytLive.input !== refKey) Object.assign(ytLive, { input: refKey, video: '', checkedAt: 0, channelId: ref.id || '' });
   if (ytLive.video) return ytLive.video;
   if (!isLive && !resumeTimer) return ''; // ไม่ได้ไลฟ์ → ไม่ค้น (ประหยัดโควตา)
   if (Date.now() - ytLive.checkedAt < 120000) return '';
@@ -1298,10 +1314,9 @@ async function resolveYouTubeVideo(key) {
 }
 // ไลฟ์ที่เจอจบแล้ว → ครั้งหน้าค้นใหม่
 function ytLiveEnded() {
-  if (ytChannelRef($('chatYoutube').value)) {
-    ytLive.video = '';
-    ytLive.checkedAt = 0;
-  }
+  ytLive.video = '';
+  ytLive.checkedAt = 0;
+  ytLive.linkChecked = ''; // ลิงก์ไลฟ์ที่ใส่ไว้: เช็กใหม่ว่ายังออนแอร์ไหม
 }
 const CHAT_SOURCES = {
   youtube: {
@@ -2196,6 +2211,13 @@ function beginLiveUi() {
 async function startLive() {
   const list = liveDestinations();
   if (!list || !helperReady()) return;
+  // Helper เก่า → ไลฟ์ได้แต่ขาดตัวแก้หลุด/เสียงเพี้ยน → เตือนทุกครั้งก่อนเริ่ม
+  if (window.versionLess(H.version, window.HELPER_MIN_VERSION)
+    && !confirm(`⚠️ Yoddoy Helper ในเครื่องเป็นเวอร์ชันเก่า (${H.version}) — ยังไม่มีตัวแก้ไลฟ์หลุด/เสียงไมค์เพี้ยน/TikTok บิตเรตเกิน\n\nกด "ยกเลิก" เพื่อไปอัปเดตก่อน (แนะนำ) หรือ "ตกลง" เพื่อไลฟ์ต่อด้วยเวอร์ชันเก่า`)) {
+    $('helperCard').hidden = false;
+    $('helperCard').scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
   // ถามครั้งเดียว: จำ Stream Key ไว้ไหม (ไม่จำ = ต้องวางคีย์ใหม่ทุกครั้งที่เปิดเว็บ)
   if (!$('rememberKeys').checked && !store.get('askedRemember', false)) {
     store.set('askedRemember', true);

@@ -80,8 +80,9 @@ function encoderArgs(cfg) {
     '-fps_mode', 'cfr',
     ...videoArgs(encoder, videoKbps, fps, latency),
     '-bsf:v', 'dump_extra=freq=keyframe', // ใส่ SPS/PPS ทุก keyframe ให้ปลายทางที่ต่อใหม่ถอดรหัสได้
-    // เสียงจากเบราว์เซอร์มาไม่สม่ำเสมอตอนเครื่องทำงานหนัก → เกลี่ยช่องว่าง/เวลาเหลื่อมให้ต่อเนื่อง (เสียงไม่กระตุก)
-    '-af', 'aresample=async=1000:first_pts=0',
+    // เสียงจากเบราว์เซอร์: เติมช่องว่างเฉพาะตอนเสียงขาดจริง (> 0.3 วิ) เท่านั้น
+    // (เดิม async=1000 = ยืด/หดเสียงตลอดเวลาเพื่อไล่เวลา → เสียงพูดเพี้ยนทุ้ม และมีเสียงคลิก/ช็อตตอนแก้เวลา)
+    '-af', 'aresample=async=1:min_hard_comp=0.300:first_pts=0',
     '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-ar', '48000', '-ac', '2',
     '-f', 'mpegts', '-mpegts_flags', '+resend_headers', '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1',
     'pipe:1',
