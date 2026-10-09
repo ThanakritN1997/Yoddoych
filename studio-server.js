@@ -66,6 +66,22 @@ function videoArgs(enc, kbps, fps, latency = 'normal') {
 // (TS ต่อกลางสตรีมได้ทุกเมื่อ ตัวส่งต่อที่เริ่มใหม่จึงเริ่มอ่านได้ทันที)
 function encoderArgs(cfg) {
   const { width, height, fps, videoKbps, audioKbps, encoder, latency } = cfg;
+  if (cfg.copy) {
+    // ภาพบีบมาแล้วจากเบราว์เซอร์ (WebCodecs, การ์ดจอ) → ไม่บีบซ้ำ แค่แปลงรูปแบบห่อ + เสียง Opus → AAC
+    return [
+      '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '1',
+      // หัวไฟล์ Matroska บอกรูปแบบครบแล้ว → ไม่ต้องรอวิเคราะห์
+      '-fflags', '+genpts+nobuffer', '-probesize', '64k', '-analyzeduration', '0',
+      '-thread_queue_size', '1024', '-f', 'matroska', '-i', 'pipe:0',
+      '-map', '0:v:0', '-map', '0:a:0',
+      // ใส่ข้อมูลตั้งค่าตัวถอดรหัส (SPS/PPS/VPS) หน้าทุกเฟรมหลัก → ปลายทางที่ต่อกลางสตรีมถอดรหัสได้
+      '-c:v', 'copy', '-bsf:v', cfg.hevc ? 'hevc_mp4toannexb' : 'h264_mp4toannexb',
+      '-af', 'aresample=async=1:min_hard_comp=0.300:first_pts=0',
+      '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-ar', '48000', '-ac', '2',
+      '-f', 'mpegts', '-mpegts_flags', '+resend_headers', '-muxdelay', '0', '-muxpreload', '0', '-flush_packets', '1',
+      'pipe:1',
+    ];
+  }
   return [
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '1',
     // โหมดดีเลย์ต่ำ: ไม่รอวิเคราะห์ input นาน (รูปแบบจากเบราว์เซอร์รู้อยู่แล้ว)
@@ -98,6 +114,8 @@ function relayArgs(target, tx) {
     '-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '2',
     // วิเคราะห์สตรีมแค่ ~3 วินาที (ค่าเริ่มต้น 5) ให้ต่อใหม่ได้เร็วขึ้น — ต้องนานกว่าระยะ keyframe (2 วินาที)
     // เพราะตัวที่เริ่มกลางสตรีมต้องรอเจอ keyframe + SPS/PPS ก่อนจึงจะรู้รูปแบบวิดีโอ
+    // ช่องที่ต้องบีบสำเนาแยก: ถอดรหัสภาพหลักด้วยการ์ดจอ (ไม่กินซีพียู)
+    ...(tx ? ['-hwaccel', 'auto'] : []),
     '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '3000000', '-probesize', '4000000', '-f', 'mpegts', '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a:0',
     ...(tx ? [...videoArgs(tx.encoder, tx.kbps, tx.fps, tx.latency), '-c:a', 'copy'] : ['-c', 'copy']),
@@ -108,11 +126,12 @@ function relayArgs(target, tx) {
 // อัดไฟล์: รับ TS ชุดเดียวกับที่ส่งไลฟ์ → ห่อเป็น MP4 (ไม่บีบอัดซ้ำ ไม่กินเครื่องเพิ่ม)
 // ใช้ MP4 แบบแบ่งท่อน (fragmented) → ถ้าเครื่องดับ/โปรแกรมปิดกลางคัน ไฟล์ส่วนที่อัดแล้วยังเปิดได้
 const REC_DIR = path.join(os.homedir(), 'Videos', 'Yoddoy');
-function recordArgs(file) {
+function recordArgs(file, hevc) {
   return [
     '-hide_banner', '-loglevel', 'warning',
     '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '3000000', '-probesize', '4000000', '-f', 'mpegts', '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy', '-bsf:a', 'aac_adtstoasc', // เสียง AAC ใน TS (ADTS) → รูปแบบที่ MP4 ต้องการ
+    ...(hevc ? ['-tag:v', 'hvc1'] : []), // H.265 ใน MP4 ให้เปิดได้ใน Windows/Mac/มือถือ
     '-movflags', '+frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', '-y', file,
   ];
 }
@@ -125,6 +144,12 @@ function recFileName(d = new Date()) {
 function boost(proc) {
   try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_ABOVE_NORMAL); } catch {}
   return proc;
+}
+
+// ตัวบีบ H.264 สำหรับสำเนาแยก: ใช้ที่ผู้ใช้เลือก ถ้าไม่มี/ใช้ไม่ได้ → ตัวแรกที่เครื่องรองรับ (การ์ดจอก่อน)
+function h264Encoder(preferred) {
+  const ids = detectEncoders().map((e) => e.id);
+  return ids.includes(preferred) ? preferred : ids[0] || 'libx264';
 }
 
 function joinUrl(url, key) {
@@ -168,7 +193,8 @@ function liveLog(line) {
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     const d = new Date();
-    const day = d.toISOString().slice(0, 10);
+    const p2 = (n) => String(n).padStart(2, '0');
+    const day = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; // วันที่ตามเวลาเครื่อง (ไม่ใช่ UTC)
     fs.appendFileSync(path.join(LOG_DIR, `live-${day}.log`), `${d.toLocaleTimeString('th-TH', { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')} ${line}\n`);
   } catch {}
 }
@@ -277,8 +303,9 @@ function attach() {
         const line = s.hide(raw);
         if (line.startsWith('frame=') || line.startsWith('size=')) {
           // มีสถิติไหลออก = ส่งถึงปลายทางแล้ว
-          if (r.state !== 'live') liveLog(`[${r.name}] ออนไลน์ (ต่อครั้งที่ ${r.connects}, ใช้เวลา ${((Date.now() - r.startedAt) / 1000).toFixed(1)} วิ)`);
+          if (r.state !== 'live') liveLog(`[${r.name}] ออนไลน์ (ต่อครั้งที่ ${r.connects}, ใช้เวลา ${((Date.now() - r.startedAt) / 1000).toFixed(1)} วิ)${r.hevcCopy ? ' · H.265' : r.tx ? ` · สำเนา H.264 ${r.tx.kbps}k` : ''}`);
           r.state = 'live';
+          r.everLive = true;
           r.kbps = num(line, 'bitrate');
           if (Date.now() - r.startedAt > 20000) r.fails = 0; // ต่อได้นานพอ → รีเซ็ตตัวนับการหลุด
           return;
@@ -298,6 +325,13 @@ function attach() {
         r.kbps = 0;
         const wait = RELAY_RETRY_MS[Math.min(r.fails, RELAY_RETRY_MS.length - 1)];
         r.fails++;
+        // ส่ง H.265 แล้วต่อไม่ติด 2 ครั้งตั้งแต่แรก = ปลายทางนี้ไม่รับ H.265 → เปลี่ยนเป็นสำเนา H.264 ให้เอง
+        if (r.hevcCopy && !r.everLive && r.fails >= 2) {
+          r.hevcCopy = false;
+          r.tx = { encoder: h264Encoder(s.cfg.encoder), kbps: s.cfg.videoKbps, fps: s.cfg.fps, latency: s.cfg.latency };
+          liveLog(`[${r.name}] ไม่รับ H.265 → เปลี่ยนเป็น H.264 อัตโนมัติ`);
+          send({ type: 'log', line: `[${r.name}] ปลายทางนี้ไม่รับ H.265 — เปลี่ยนเป็น H.264 ให้อัตโนมัติ` });
+        }
         send({ type: 'log', line: `[${r.name}] การเชื่อมต่อหลุด (code ${code}) — ต่อใหม่ใน ${wait / 1000} วินาที (ครั้งที่ ${r.connects})` });
         r.timer = setTimeout(() => startRelay(s, r), wait);
       });
@@ -315,10 +349,12 @@ function attach() {
       const secrets = list.map((d) => String(d.key || '').trim()).filter((k) => k.length > 3);
       s.secrets = secrets;
       s.relays = list.map((d) => {
-        // ปลายทางที่รับบิตเรตต่ำกว่าภาพหลัก → บีบอัดสำเนาแยกที่บิตเรตของช่องนั้น
+        // บีบอัดสำเนาแยกเมื่อ: ช่องนี้รับบิตเรตต่ำกว่าภาพหลัก หรือ ภาพหลักเป็น H.265 แต่ช่องนี้รับได้แค่ H.264
         const max = Math.max(300, Number(d.maxKbps) || 0);
-        const tx = d.maxKbps && max < s.cfg.videoKbps * 0.95 ? { encoder: s.cfg.encoder, kbps: max, fps: s.cfg.fps, latency: s.cfg.latency } : null;
-        return { name: d.name, target: joinUrl(d.url, d.key), tx, state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null };
+        const lower = d.maxKbps && max < s.cfg.videoKbps * 0.95;
+        const needH264 = s.cfg.hevc && !d.hevc;
+        const tx = lower || needH264 ? { encoder: h264Encoder(s.cfg.encoder), kbps: Math.min(max || s.cfg.videoKbps, s.cfg.videoKbps), fps: s.cfg.fps, latency: s.cfg.latency } : null;
+        return { name: d.name, target: joinUrl(d.url, d.key), tx, hevcCopy: s.cfg.hevc && !tx, everLive: false, state: 'connecting', connects: 0, fails: 0, kbps: 0, proc: null, timer: null };
       });
       s.relays.forEach((r) => startRelay(s, r));
     }
@@ -331,7 +367,7 @@ function attach() {
         return send({ type: 'error', message: 'สร้างโฟลเดอร์เก็บไฟล์ไม่ได้: ' + e.message });
       }
       const file = path.join(REC_DIR, recFileName());
-      const proc = boost(spawn(FFMPEG, recordArgs(file), { windowsHide: true }));
+      const proc = boost(spawn(FFMPEG, recordArgs(file, s.cfg.hevc), { windowsHide: true }));
       const rec = { proc, file, bytes: 0, startedAt: Date.now() };
       s.rec = rec;
       recordingNow.add(path.basename(file));
@@ -383,6 +419,8 @@ function attach() {
           audioKbps: [96, 128, 160, 192].includes(msg.audioKbps) ? msg.audioKbps : 160,
           encoder: encs.includes(msg.encoder) ? msg.encoder : encs[0] || 'libx264',
           latency: LATENCY[msg.latency] ? msg.latency : 'normal',
+          copy: msg.input === 'mkv-h264' || msg.input === 'mkv-hevc', // เบราว์เซอร์บีบมาแล้ว (WebCodecs) → ส่งต่อไม่บีบซ้ำ
+          hevc: msg.input === 'mkv-hevc', // ภาพหลักเป็น H.265 → ช่องที่ไม่รองรับ แปลงเป็น H.264 ให้
         };
         const s = {
           stopped: false,
@@ -454,7 +492,7 @@ function attach() {
         });
         s.encoder.on('error', (e) => send({ type: 'error', message: 'เปิด FFmpeg ไม่ได้: ' + e.message }));
 
-        liveLog(`[เริ่ม] ${cfg.width}x${cfg.height}@${cfg.fps} ${cfg.videoKbps}k ${cfg.encoder} ดีเลย์=${cfg.latency} · ปลายทาง: ${enabled.map((d) => d.name).join(', ') || '-'}${msg.record ? ' · อัดไฟล์' : ''}`);
+        liveLog(`[เริ่ม] ${cfg.width}x${cfg.height}@${cfg.fps} ${cfg.videoKbps}k ${cfg.copy ? 'บีบในเบราว์เซอร์รอบเดียว (WebCodecs)' : cfg.encoder} ดีเลย์=${cfg.latency} · ปลายทาง: ${enabled.map((d) => d.name).join(', ') || '-'}${msg.record ? ' · อัดไฟล์' : ''}`);
         if (msg.boostBrowser !== false) {
           s.boosted = true;
           boostBrowsers(true);

@@ -562,6 +562,14 @@
           <label class="field">ตัวเข้ารหัส
             <select id="encoder"><option value="">กำลังตรวจ…</option></select>
           </label>
+          <label class="field">วิธีบีบอัดภาพ
+            <select id="encMode">
+              <option value="auto">บีบรอบเดียวด้วยการ์ดจอ — แนะนำ (เครื่องเบา ภาพคม)</option>
+              <option value="hevc">บีบรอบเดียว H.265 — คมที่สุดบน YouTube (ช่องอื่นแปลงเป็น H.264 ให้)</option>
+              <option value="legacy">แบบเดิม (บีบ 2 รอบ) — ใช้ถ้าแบบใหม่มีปัญหา</option>
+            </select>
+          </label>
+          <p id="encModeInfo" class="muted small face-status"></p>
           <label class="check small"><input id="boostBrowser" type="checkbox" checked> ระหว่างไลฟ์ให้ Chrome/ตัวส่งไลฟ์ได้ซีพียูก่อนเกม (ลดภาพกระตุกเมื่อเล่นเกมบนเครื่องเดียวกัน)</label>
           <div class="row">
             <button id="logOpen" class="btn small">📄 เปิดบันทึกการไลฟ์</button>
@@ -673,6 +681,7 @@
   <script src="helper.js"></script>
   <script src="beauty.js"></script>
   <script src="face.js"></script>
+  <script src="encoder.js"></script>
   <script src="studio.js"></script>
   <script src="mixer.js"></script>
   <script src="scenes.js"></script>

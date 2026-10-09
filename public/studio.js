@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 // ---------- แพลตฟอร์ม ----------
 // max = บิตเรตวิดีโอสูงสุดที่แนะนำโดยประมาณ (kbps) · orient = แนวภาพที่แพลตฟอร์มนั้นเหมาะ (h แนวนอน / v แนวตั้ง)
 const PLATFORMS = {
-  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, /* เกินนี้ YouTube เตือน "สูงกว่าที่แนะนำ" */ orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
+  youtube: { name: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', max: 9000, /* เกินนี้ YouTube เตือน "สูงกว่าที่แนะนำ" */ hevc: true, /* รับ H.265 (Enhanced RTMP) */ orient: 'h', help: 'YouTube Studio → สร้าง → ถ่ายทอดสด → คัดลอก “คีย์สตรีม” · แนะนำ: ปิด “หยุดอัตโนมัติ” ในการตั้งค่าสตรีม เพื่อไม่ให้แยกเป็นหลายคลิปเวลาเน็ตสะดุด' },
   facebook: { name: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', max: 9000, orient: 'h', help: 'Facebook → วิดีโอสด → ซอฟต์แวร์สตรีม → คัดลอก “คีย์สตรีม”' },
   tiktok: { name: 'TikTok', url: '', max: 6000, orient: 'v', help: 'TikTok LIVE Center → Stream key (บัญชีต้องได้สิทธิ์ไลฟ์ผ่านคอม) → คัดลอก Server URL และ Stream Key · ไม่มี Stream Key? ใช้ปุ่ม “เปิดจอสำหรับ LIVE Studio” แทน' },
   instagram: { name: 'Instagram', url: '', max: 6000, orient: 'v', help: 'instagram.com บนคอม → สร้าง → วิดีโอสด → คัดลอก Stream URL และ Stream key' },
@@ -2129,7 +2129,7 @@ function liveDestinations() {
     toast(`${PLATFORMS[missing.platform].name}: ใส่ Server URL และ Stream Key ให้ครบ`);
     return null;
   }
-  return active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key, maxKbps: (PLATFORMS[d.platform] || PLATFORMS.custom).max }));
+  return active.map((d) => ({ name: PLATFORMS[d.platform].name, url: d.url, key: d.key, maxKbps: (PLATFORMS[d.platform] || PLATFORMS.custom).max, hevc: !!(PLATFORMS[d.platform] || {}).hevc }));
 }
 
 function helperReady() {
@@ -2153,27 +2153,49 @@ async function startPipeline({ destinations, record }) {
   sessionUp = false;
   setTickFps(plan.fps);
   const video = canvas.captureStream(plan.fps).getVideoTracks()[0];
-  const stream = new MediaStream([video, mixOut.stream.getAudioTracks()[0]]);
-  recorder = new MediaRecorder(stream, {
-    mimeType: pickMime(),
-    // ส่งภายในเครื่องแบบคุณภาพเผื่อไว้ ~1.6 เท่า แล้วค่อยบีบที่ FFmpeg (สูงเกินไปทำให้เบราว์เซอร์เข้ารหัสหนักโดยไม่จำเป็น)
-    // ส่งภายในเครื่อง (ไม่กินเน็ต) → ตั้งสูงไว้ ภาพไม่เสียรายละเอียดตอนบีบอัดรอบสองที่ Helper
-    videoBitsPerSecond: Math.min(40e6, Math.max(16e6, plan.videoKbps * 2500)),
-    audioBitsPerSecond: 192000,
-  });
-  // ส่ง Blob ตรง ๆ: WebSocket รับประกันลำดับ (ถ้า await arrayBuffer() ก่อน ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)
+  video.contentHint = 'motion';
+  const audio = mixOut.stream.getAudioTracks()[0];
+  const latency = $('latency').value;
+
+  // โหมดบีบรอบเดียว (WebCodecs): Helper 1.6.0+ · ผู้ใช้ไม่ได้เลือกโหมดเดิม · Chrome บีบด้วยการ์ดจอได้ · ยังไม่เคยพังในรอบนี้
+  let wcConfig = null;
+  if (H && !window.versionLess(H.version, '1.6.0') && $('encMode').value !== 'legacy' && !wcBroken) {
+    const wantHevc = $('encMode').value === 'hevc';
+    wcConfig = await wcVideoConfig({ width: plan.width, height: plan.height, fps: plan.fps, kbps: plan.videoKbps, hevc: wantHevc });
+    if (!wcConfig && wantHevc) wcConfig = await wcVideoConfig({ width: plan.width, height: plan.height, fps: plan.fps, kbps: plan.videoKbps }); // การ์ดจอไม่รองรับ H.265 → H.264
+  }
+  const isHevc = !!(wcConfig && /^h(vc|ev)1/.test(wcConfig.codec));
+  encodeMode = wcConfig ? 'webcodecs' : 'legacy';
+  renderEncMode();
+
+  if (wcConfig) {
+    recorder = new WcRecorder({
+      videoTrack: video, audioTrack: audio, width: plan.width, height: plan.height, fps: plan.fps,
+      kbps: plan.videoKbps, gopSec: latency === 'low' ? 1 : 2, config: wcConfig, audioKbps: plan.audioKbps,
+    });
+  } else {
+    recorder = new MediaRecorder(new MediaStream([video, audio]), {
+      mimeType: pickMime(),
+      // ส่งภายในเครื่อง (ไม่กินเน็ต) → ตั้งสูงไว้ ภาพไม่เสียรายละเอียดตอนบีบอัดรอบสองที่ Helper
+      videoBitsPerSecond: Math.min(40e6, Math.max(16e6, plan.videoKbps * 2500)),
+      audioBitsPerSecond: 192000,
+    });
+  }
+  // ส่งตรง ๆ ตามลำดับ: WebSocket รับประกันลำดับ (ถ้ารอแปลงก่อนส่ง ชิ้นที่เล็กกว่าอาจแซงคิว → วิดีโอเพี้ยน/หลุด)
   let lastChunkAt = performance.now();
   recorder.ondataavailable = (e) => {
     const now = performance.now();
     diag.maxGap = Math.max(diag.maxGap, now - lastChunkAt); // ช่วงที่เบราว์เซอร์ไม่ได้ส่งภาพ (ยิ่งนาน ยิ่งกระตุก)
     lastChunkAt = now;
-    if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+    const size = e.data.size ?? e.data.byteLength;
+    if (size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
   };
   recorder.onerror = (e) => {
-    appendLog('MediaRecorder error: ' + ((e.error && e.error.message) || 'unknown'));
-    // เบราว์เซอร์หยุดบันทึกภาพ → ปิดรอบนี้แล้วเริ่มใหม่อัตโนมัติ
+    appendLog(`${encodeMode === 'webcodecs' ? 'ตัวบีบอัดการ์ดจอ' : 'MediaRecorder'} error: ` + ((e.error && e.error.message) || 'unknown'));
+    // บีบรอบเดียวพัง → รอบนี้กลับไปใช้แบบเดิม · ทุกกรณี: ปิดรอบนี้แล้วระบบกู้ไลฟ์เริ่มใหม่ให้เอง
+    if (encodeMode === 'webcodecs') wcBroken = true;
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
-    stopPipeline('เบราว์เซอร์หยุดบันทึกภาพ', { resume: true });
+    stopPipeline('ตัวบีบอัดภาพหยุดทำงาน', { resume: true });
   };
   keepAwake(true);
   ws.send(JSON.stringify({
@@ -2181,15 +2203,29 @@ async function startPipeline({ destinations, record }) {
     width: plan.width, height: plan.height, fps: plan.fps,
     videoKbps: plan.videoKbps, audioKbps: plan.audioKbps,
     encoder: $('encoder').value,
-    latency: $('latency').value,
+    latency,
     delaySec: delaySec(),
     destinations: destinations || [],
     record: !!record,
     boostBrowser: $('boostBrowser').checked,
+    input: encodeMode === 'webcodecs' ? (isHevc ? 'mkv-hevc' : 'mkv-h264') : 'webm',
   }));
-  recorder.start(RECORDER_SLICE[$('latency').value] || 250);
+  if (encodeMode === 'webcodecs') await recorder.start();
+  else recorder.start(RECORDER_SLICE[latency] || 250);
   clearInterval(clock);
   clock = setInterval(updateClock, 1000);
+}
+
+// ---------- โหมดบีบอัดภาพ ----------
+let encodeMode = 'legacy';
+let wcBroken = false; // บีบรอบเดียวพังระหว่างเปิดหน้านี้ → ใช้แบบเดิมจนกว่าจะรีเฟรช
+$('encMode').value = store.get('encMode', 'auto');
+$('encMode').onchange = () => { store.set('encMode', $('encMode').value); wcBroken = false; renderEncMode(); };
+function renderEncMode() {
+  const old = H && window.versionLess(H.version, '1.6.0');
+  $('encModeInfo').textContent = recorder
+    ? (encodeMode === 'webcodecs' ? '🟢 กำลังใช้: บีบรอบเดียวด้วยการ์ดจอ (เครื่องเบา ภาพคม)' : '🟡 กำลังใช้: แบบเดิม (บีบ 2 รอบ)')
+    : old ? 'ต้องใช้ Yoddoy Helper 1.6.0 ขึ้นไป — กดอัปเดตด้านบน' : wcBroken ? 'บีบรอบเดียวมีปัญหาในรอบนี้ — ใช้แบบเดิมแทน (รีเฟรชเพื่อลองใหม่)' : '';
 }
 
 function beginLiveUi() {
@@ -2385,6 +2421,7 @@ function updateOutputUi() {
   if (!isLive) $('destStatus').innerHTML = '';
   updateClock();
   lockSettings();
+  if (typeof renderEncMode === 'function') renderEncMode();
 }
 
 function lockSettings() {
